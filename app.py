@@ -2,6 +2,7 @@ import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 import io
+import pytz  # Biblioteca para ajustar o fuso horário
 
 # --- 1. CONFIGURAÇÕES DA PÁGINA ---
 st.set_page_config(page_title="Docito Doceria - Orçamentos", page_icon="🍰")
@@ -25,7 +26,6 @@ def gerar_imagem(cliente, data_entrega, itens):
     W = 600
     num_itens = len(itens)
     
-    # Ajuste adaptativo de fonte e espaçamento
     if num_itens <= 8:
         tam_fonte_item = 18
         espaco_linha = 35
@@ -36,17 +36,15 @@ def gerar_imagem(cliente, data_entrega, itens):
         tam_fonte_item = 14
         espaco_linha = 25
 
-    # Dimensões do layout
     altura_cabecalho = 110
     altura_dados_cliente = 220
     altura_rodape = 150
     H_dinamico = altura_cabecalho + altura_dados_cliente + (num_itens * espaco_linha) + altura_rodape
     H = max(H_dinamico, 800)
 
-    # Cores Identidade Docito
-    cor_fundo_logo = (255, 195, 153) # Laranja pêssego
-    cor_marrom_logo = (65, 38, 30)   # Marrom
-    cor_destaque = (210, 80, 30)     # Laranja escuro
+    cor_fundo_logo = (255, 195, 153)
+    cor_marrom_logo = (65, 38, 30)
+    cor_destaque = (210, 80, 30)
     
     def carregar_fonte(tamanho, negrito=False):
         fontes = ["arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf"]
@@ -62,10 +60,8 @@ def gerar_imagem(cliente, data_entrega, itens):
     draw.rectangle([0, 0, W, altura_cabecalho], fill=cor_fundo_logo)
     try:
         logo = Image.open("logo.png").convert("RGBA")
-        tamanho_logo = 130 # Logo um pouco maior que a faixa para efeito visual
+        tamanho_logo = 130
         logo = logo.resize((tamanho_logo, tamanho_logo))
-        
-        # Centralização perfeita X e Y
         pos_x = (W - tamanho_logo) // 2
         pos_y = (altura_cabecalho - tamanho_logo) // 2
         img.paste(logo, (pos_x, pos_y), logo)
@@ -96,14 +92,16 @@ def gerar_imagem(cliente, data_entrega, itens):
     draw.text((50, y_itens + 35), "TOTAL DO PEDIDO", fill=cor_marrom_logo, font=carregar_fonte(22, True))
     draw.text((400, y_itens + 35), f"R$ {total_geral:.2f}", fill=cor_destaque, font=carregar_fonte(24, True))
 
-    # Validade discreta
-    agora = datetime.now()
+    # --- VALIDADE COM FUSO HORÁRIO BRASIL ---
+    fuso_br = pytz.timezone('America/Sao_Paulo')
+    agora = datetime.now(fuso_br)
     texto_v = f"Gerado em: {agora.strftime('%d/%m/%Y %H:%M')} | Validade: 15 dias"
     fonte_v = carregar_fonte(11)
-    largura_v = draw.textbbox((0, 0), texto_v, font=fonte_v)[2]
+    bbox_v = draw.textbbox((0, 0), texto_v, font=fonte_v)
+    largura_v = bbox_v[2] - bbox_v[0]
     draw.text((W - largura_v - 50, H - 155), texto_v, fill=(160, 160, 160), font=fonte_v)
 
-    # --- RODAPÉ COM LINHA MARROM ---
+    # --- RODAPÉ ---
     draw.rectangle([0, H-135, W, H], fill=cor_fundo_logo)
     avisos = [
         "• Forminhas 4 pétalas (branca) inclusas.",
@@ -113,23 +111,15 @@ def gerar_imagem(cliente, data_entrega, itens):
     for i, aviso in enumerate(avisos):
         draw.text((45, H-120 + (i*22)), aviso, fill=cor_marrom_logo, font=carregar_fonte(15))
 
-    # Linha Marrom Sólida
     y_linha = H - 55
     draw.line((45, y_linha, 555, y_linha), fill=cor_marrom_logo, width=1)
 
     # --- CONTATOS CENTRALIZADOS ---
     contatos = "Instagram: @docito_doceria123 | WhatsApp: (37) 99996-5194"
     fonte_contatos = carregar_fonte(14, True)
-
-    # 1. Medimos o tamanho que o texto ocupa
-    # O textbbox retorna (esquerda, topo, direita, baixo)
     bbox_contatos = draw.textbbox((0, 0), contatos, font=fonte_contatos)
     largura_contatos = bbox_contatos[2] - bbox_contatos[0]
-
-    # 2. Calculamos o X para centralizar
     pos_x_contatos = (W - largura_contatos) // 2
-
-    # 3. Desenhamos o texto na nova posição X
     draw.text((pos_x_contatos, y_linha + 12), contatos, fill=cor_marrom_logo, font=fonte_contatos)
 
     buffer = io.BytesIO()
@@ -137,7 +127,7 @@ def gerar_imagem(cliente, data_entrega, itens):
     buffer.seek(0)
     return buffer
 
-# --- 4. INTERFACE ---
+# --- 4. INTERFACE STREAMLIT ---
 st.image("logo.png", width=100)
 st.title("Gerador Docito Doceria")
 
@@ -177,8 +167,9 @@ if st.session_state.carrinho:
 
     if st.button("GERAR IMAGEM FINAL", type="primary", use_container_width=True):
         if cliente:
-            res = gerar_imagem(cliente, data_ent, st.session_state.carrinho)
-            st.image(res)
-            st.download_button("📥 Baixar Orçamento", res, f"Docito_{cliente}.png", "image/png")
+            with st.spinner('Ajustando o fuso horário e gerando imagem...'):
+                res = gerar_imagem(cliente, data_ent, st.session_state.carrinho)
+                st.image(res)
+                st.download_button("📥 Baixar Orçamento", res, f"Docito_{cliente}.png", "image/png")
         else:
             st.warning("Escreva o nome da cliente!")
