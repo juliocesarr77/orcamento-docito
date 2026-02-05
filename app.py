@@ -12,11 +12,11 @@ CATALOGO = {
     "Brigadeiro Chocolate": 125.00, "Brigadeiro Ninho": 125.00,
     "Beijinho": 125.00, "Meio a Meio": 125.00,
     "Bicho de Pé": 125.00, "Moranguinho": 125.00,
-    "Cajuzinho": 130.00, "Ninho com Nutella": 150.00,
-    "Churros": 150.00, "Ferrero Rocher": 150.00,
-    "Maracujá": 150.00, "Limão": 150.00,
+    "Cajuzinho": 125.00, "Ninho com Nutella": 140.00,
+    "Churros": 150.00, "Ferrero Rocher": 140.00,
+    "Maracujá": 150.00, "Limão": 140.00,
     "Maçãzinha": 150.00, "Olho de Sogra": 150.00,
-    "Oreo": 150.00, "Meio Amargo": 160.00,
+    "Oreo": 140.00, "Meio Amargo": 160.00,
     "Romeu e Julieta": 185.00, "Red Velvet": 185.00,
     "Ninho Temático": 160.00
 }
@@ -173,3 +173,4 @@ if st.session_state.carrinho:
                 st.download_button("📥 Baixar Orçamento", res, f"Docito_{cliente}.png", "image/png")
         else:
             st.warning("Escreva o nome da cliente!")
+
