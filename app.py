@@ -2,7 +2,7 @@ import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 import io
-import pytz  # Biblioteca para ajustar o fuso horário
+import pytz
 
 # --- 1. CONFIGURAÇÕES DA PÁGINA ---
 st.set_page_config(page_title="Docito Doceria - Orçamentos", page_icon="🍰")
@@ -47,7 +47,8 @@ def gerar_imagem(cliente, data_entrega, itens):
     cor_destaque = (210, 80, 30)
     
     def carregar_fonte(tamanho, negrito=False):
-        fontes = ["arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf"]
+        # Tenta carregar fontes comuns em sistemas Linux (Streamlit Cloud) e Windows
+        fontes = ["arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
         for f in fontes:
             try: return ImageFont.truetype(f, tamanho)
             except: continue
@@ -128,8 +129,12 @@ def gerar_imagem(cliente, data_entrega, itens):
     return buffer
 
 # --- 4. INTERFACE STREAMLIT ---
-st.image("logo.png", width=100)
-st.title("Gerador Docito Doceria")
+try:
+    st.image("logo.png", width=100)
+except:
+    st.title("🍰 DOCITO DOCERIA")
+
+st.title("Gerador de Orçamentos")
 
 if 'carrinho' not in st.session_state:
     st.session_state.carrinho = []
@@ -142,6 +147,7 @@ with col_c2:
 
 st.divider()
 
+# --- ADICIONAR ITEM ---
 c1, c2, c3 = st.columns([3, 1, 1])
 with c1:
     p = st.selectbox("Produto", list(CATALOGO.keys()))
@@ -149,32 +155,55 @@ with c2:
     q = st.number_input("Qtd", min_value=1, value=50)
 with c3:
     st.write(" ")
-    if st.button("➕"):
+    if st.button("➕ Adicionar"):
         st.session_state.carrinho.append({"produto": p, "qtd": q, "preco_cento": CATALOGO[p]})
+        st.rerun()
 
+# --- LISTAGEM E EDIÇÃO ---
 if st.session_state.carrinho:
     st.subheader("🛒 Itens Selecionados")
+    
+    # Cabeçalho da Lista
+    h_col1, h_col2, h_col3 = st.columns([3, 1, 0.5])
+    h_col1.caption("Produto")
+    h_col2.caption("Qtd (Editar)")
+    h_col3.write("")
+
     for i, item in enumerate(st.session_state.carrinho):
-        col_it, col_bt = st.columns([4, 1])
-        col_it.write(f"🔸 {item['qtd']}un - {item['produto']}")
+        col_prod, col_qtd, col_bt = st.columns([3, 1, 0.5])
+        
+        col_prod.write(f"**{item['produto']}**")
+        
+        # Campo de edição de quantidade
+        nova_qtd = col_qtd.number_input(
+            "Qtd", 
+            min_value=1, 
+            value=int(item['qtd']), 
+            key=f"edit_{i}", 
+            label_visibility="collapsed"
+        )
+        
+        # Se a quantidade mudar, atualiza e recarrega
+        if nova_qtd != item['qtd']:
+            st.session_state.carrinho[i]['qtd'] = nova_qtd
+            st.rerun()
+
+        # Botão para excluir item
         if col_bt.button("❌", key=f"del_{i}"):
             st.session_state.carrinho.pop(i)
             st.rerun()
     
-    if st.button("LIMPAR TUDO"):
+    st.divider()
+    
+    if st.button("LIMPAR TUDO", type="secondary"):
         st.session_state.carrinho = []
         st.rerun()
 
     if st.button("GERAR IMAGEM FINAL", type="primary", use_container_width=True):
         if cliente:
-            with st.spinner('Ajustando o fuso horário e gerando imagem...'):
+            with st.spinner('Gerando orçamento...'):
                 res = gerar_imagem(cliente, data_ent, st.session_state.carrinho)
                 st.image(res)
                 st.download_button("📥 Baixar Orçamento", res, f"Docito_{cliente}.png", "image/png")
         else:
-            st.warning("Escreva o nome da cliente!")
-
-
-
-
-
+            st.warning("Por favor, preencha o nome da cliente!")
