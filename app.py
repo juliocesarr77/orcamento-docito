@@ -107,8 +107,7 @@ def gerar_imagem(cliente, data_entrega, itens):
     avisos = [
         "• Forminhas 4 pétalas (branca) inclusas.",
         "• Forminhas decorativas fornecidas pelo cliente",
-        "  terão custo adicional por caixa extra utilizada.",
-        "• Entrega em toda Lagoa da Prata (Gratuita)."
+        "  terão custo adicional por caixa extra utilizada."
     ]
     for i, aviso in enumerate(avisos):
         draw.text((45, H-120 + (i*22)), aviso, fill=cor_marrom_logo, font=carregar_fonte(15))
