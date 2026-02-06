@@ -18,7 +18,7 @@ CATALOGO = {
     "Maçãzinha": 150.00, "Olho de Sogra": 150.00,
     "Oreo": 150.00, "Meio Amargo": 160.00,
     "Romeu e Julieta": 185.00, "Red Velvet": 185.00,
-    "Ninho Temático": 160.00, "Aplique": 0.50
+    "Ninho Temático": 160.00, "Aplique": 50.00
 }
 
 # --- 3. LÓGICA DE GERAÇÃO DA IMAGEM ---
@@ -173,6 +173,7 @@ if st.session_state.carrinho:
                 st.download_button("📥 Baixar Orçamento", res, f"Docito_{cliente}.png", "image/png")
         else:
             st.warning("Escreva o nome da cliente!")
+
 
 
 
