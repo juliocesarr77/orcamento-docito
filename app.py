@@ -107,7 +107,8 @@ def gerar_imagem(cliente, data_entrega, itens):
     avisos = [
         "• Forminhas 4 pétalas (branca) inclusas.",
         "• Forminhas decorativas fornecidas pelo cliente",
-        "  terão custo adicional por caixa extra utilizada."
+        "  terão custo adicional por caixa extra utilizada.",
+        "• Entrega em toda Lagoa da Prata (Gratuita)."
     ]
     for i, aviso in enumerate(avisos):
         draw.text((45, H-120 + (i*22)), aviso, fill=cor_marrom_logo, font=carregar_fonte(15))
@@ -207,3 +208,4 @@ if st.session_state.carrinho:
                 st.download_button("📥 Baixar Orçamento", res, f"Docito_{cliente}.png", "image/png")
         else:
             st.warning("Por favor, preencha o nome da cliente!")
+
