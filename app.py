@@ -4,6 +4,7 @@ from datetime import datetime
 import io
 import pytz
 from pathlib import Path
+import base64
 
 # Caminho base do projeto
 BASE_DIR = Path(__file__).resolve().parent
@@ -65,8 +66,8 @@ def gerar_imagem(cliente, data_entrega, itens):
     altura_dados_cliente = 220
     altura_rodape = 150
 
-    # Aumentei a área dinâmica para caber total + pagamento
-    H_dinamico = altura_cabecalho + altura_dados_cliente + (num_itens * espaco_linha) + altura_rodape + 90
+    # Área dinâmica para caber total + formas de pagamento
+    H_dinamico = altura_cabecalho + altura_dados_cliente + (num_itens * espaco_linha) + altura_rodape + 110
     H = max(H_dinamico, 880)
 
     cor_fundo_logo = (255, 195, 153)
@@ -132,7 +133,6 @@ def gerar_imagem(cliente, data_entrega, itens):
 
         draw.text((50, y_itens), texto_item, fill=cor_marrom_logo, font=fonte_item)
 
-        # Alinhar valor à direita
         bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_item)
         largura_valor = bbox_valor[2] - bbox_valor[0]
         x_valor = 550 - largura_valor
@@ -170,31 +170,33 @@ def gerar_imagem(cliente, data_entrega, itens):
         font=fonte_total
     )
 
-    draw.line((50, y_itens + 95, 550, y_itens + 95), fill=cor_fundo_logo, width=2)
+    # Mais espaço abaixo do valor total
+    draw.line((50, y_itens + 105, 550, y_itens + 105), fill=cor_fundo_logo, width=2)
 
     # --- FORMAS DE PAGAMENTO ---
     draw.text(
-    (50, y_itens + 110),
-    "FORMAS DE PAGAMENTO",
-    fill=cor_marrom_logo,
-    font=carregar_fonte(16, True)
-)
+        (50, y_itens + 120),
+        "FORMAS DE PAGAMENTO",
+        fill=cor_marrom_logo,
+        font=carregar_fonte(16, True)
+    )
+
     draw.text(
-        (50, y_itens + 135),
+        (50, y_itens + 145),
         "Pix | Dinheiro | Cartão | Crypto",
         fill=cor_marrom_logo,
         font=carregar_fonte(16)
     )
 
     draw.text(
-        (50, y_itens + 160),
+        (50, y_itens + 170),
         "Cartão em até 12x (juros da maquininha)",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
     )
 
     draw.text(
-        (50, y_itens + 185),
+        (50, y_itens + 195),
         "Reserva mediante confirmação.",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
@@ -310,17 +312,50 @@ if st.session_state.carrinho:
             with st.spinner("Gerando orçamento..."):
                 res = gerar_imagem(cliente, data_ent, st.session_state.carrinho)
                 st.image(res)
-                st.download_button(
-                    "📥 Baixar Orçamento",
-                    res,
-                    f"Docito_{cliente.strip()}.png",
-                    "image/png",
-                )
+
+                col_b1, col_b2 = st.columns(2)
+
+                with col_b1:
+                    st.download_button(
+                        "📥 Baixar Orçamento",
+                        res,
+                        f"Docito_{cliente.strip()}.png",
+                        "image/png",
+                    )
+
+                with col_b2:
+                    img_base64 = base64.b64encode(res.getvalue()).decode()
+
+                    copy_script = f"""
+                    <button onclick="copyImage()" style="
+                        width: 100%;
+                        background-color: #d86a2b;
+                        color: white;
+                        border: none;
+                        padding: 0.6rem 1rem;
+                        border-radius: 0.5rem;
+                        cursor: pointer;
+                        font-size: 14px;
+                        font-weight: 600;
+                    ">
+                        📋 Copiar imagem
+                    </button>
+
+                    <script>
+                    async function copyImage() {{
+                        try {{
+                            const response = await fetch("data:image/png;base64,{img_base64}");
+                            const blob = await response.blob();
+                            const item = new ClipboardItem({{"image/png": blob}});
+                            await navigator.clipboard.write([item]);
+                            alert("Imagem copiada! Agora é só colar no WhatsApp.");
+                        }} catch (err) {{
+                            alert("Seu navegador pode não permitir copiar imagem diretamente. Use o botão de baixar.");
+                        }}
+                    }}
+                    </script>
+                    """
+                    st.components.v1.html(copy_script, height=55)
+
         else:
             st.warning("Por favor, preencha o nome da cliente!")
-
-
-
-
-
-
