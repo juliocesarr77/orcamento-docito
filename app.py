@@ -46,14 +46,12 @@ def gerar_imagem(cliente, data_entrega, itens):
     cor_marrom_logo = (65, 38, 30)
     cor_destaque = (210, 80, 30)
     
-   def carregar_fonte(tamanho, negrito=False):
-       try:
-           if negrito == True:
-              return ImageFont.truetype("DejaVuSans-Bold.ttf", tamanho)
-        else:
-            return ImageFont.truetype("DejaVuSans.ttf", tamanho)
-    except Exception:
-        return ImageFont.load_default()
+        def carregar_fonte(tamanho, negrito=False):
+            fonte = "DejaVuSans-Bold.ttf" if negrito else "DejaVuSans.ttf"
+            try:
+                return ImageFont.truetype(fonte, tamanho)
+            except:
+                return ImageFont.load_default()
 
     img = Image.new('RGB', (W, int(H)), color=(255, 255, 255))
     draw = ImageDraw.Draw(img)
@@ -208,6 +206,7 @@ if st.session_state.carrinho:
                 st.download_button("📥 Baixar Orçamento", res, f"Docito_{cliente}.png", "image/png")
         else:
             st.warning("Por favor, preencha o nome da cliente!")
+
 
 
 
