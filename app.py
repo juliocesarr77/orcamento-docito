@@ -47,11 +47,12 @@ def gerar_imagem(cliente, data_entrega, itens):
     cor_destaque = (210, 80, 30)
     
     def carregar_fonte(tamanho, negrito=False):
-        # Tenta carregar fontes comuns em sistemas Linux (Streamlit Cloud) e Windows
-        fontes = ["arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
-        for f in fontes:
-            try: return ImageFont.truetype(f, tamanho)
-            except: continue
+    try:
+        if negrito:
+            return ImageFont.truetype("DejaVuSans-Bold.ttf", tamanho)
+        else:
+            return ImageFont.truetype("DejaVuSans.ttf", tamanho)
+    except:
         return ImageFont.load_default()
 
     img = Image.new('RGB', (W, int(H)), color=(255, 255, 255))
@@ -207,6 +208,7 @@ if st.session_state.carrinho:
                 st.download_button("📥 Baixar Orçamento", res, f"Docito_{cliente}.png", "image/png")
         else:
             st.warning("Por favor, preencha o nome da cliente!")
+
 
 
 
