@@ -139,9 +139,15 @@ def gerar_imagem(cliente, data_entrega, itens):
     draw.text(
     (50, y_itens + 110),
     "Pagamento: Pix | Dinheiro | Cartão Débito e Crédito | Cripto",
-    "(até 12x com juros da maquininha)",
     fill=cor_marrom_logo,
     font=carregar_fonte(16)
+)
+
+draw.text(
+    (50, y_itens + 135),
+                "(até 12x com juros da maquininha)",
+    fill=cor_marrom_logo,
+    font=carregar_fonte(14)
 )
 
     texto_total = f"R$ {total_geral:.2f}"
@@ -270,6 +276,7 @@ if st.session_state.carrinho:
                 )
         else:
             st.warning("Por favor, preencha o nome da cliente!")
+
 
 
 
