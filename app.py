@@ -66,9 +66,19 @@ def gerar_imagem(cliente, data_entrega, itens):
     altura_dados_cliente = 220
     altura_rodape = 150
 
-    # Área dinâmica para caber total + formas de pagamento
-    H_dinamico = altura_cabecalho + altura_dados_cliente + (num_itens * espaco_linha) + altura_rodape + 110
-    H = max(H_dinamico, 880)
+    # Espaço reservado para:
+    # total + linha + formas de pagamento + observação + validade
+    altura_bloco_final = 260
+
+    H_dinamico = (
+        altura_cabecalho
+        + altura_dados_cliente
+        + (num_itens * espaco_linha)
+        + altura_bloco_final
+        + altura_rodape
+    )
+
+    H = max(H_dinamico, 950)
 
     cor_fundo_logo = (255, 195, 153)
     cor_marrom_logo = (65, 38, 30)
@@ -133,6 +143,7 @@ def gerar_imagem(cliente, data_entrega, itens):
 
         draw.text((50, y_itens), texto_item, fill=cor_marrom_logo, font=fonte_item)
 
+        # Alinhar valor à direita
         bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_item)
         largura_valor = bbox_valor[2] - bbox_valor[0]
         x_valor = 550 - largura_valor
@@ -170,33 +181,33 @@ def gerar_imagem(cliente, data_entrega, itens):
         font=fonte_total
     )
 
-    # Mais espaço abaixo do valor total
-    draw.line((50, y_itens + 105, 550, y_itens + 105), fill=cor_fundo_logo, width=2)
+    # Linha com um pouco mais de espaço abaixo do valor total
+    draw.line((50, y_itens + 110, 550, y_itens + 110), fill=cor_fundo_logo, width=2)
 
     # --- FORMAS DE PAGAMENTO ---
     draw.text(
-        (50, y_itens + 120),
+        (50, y_itens + 125),
         "FORMAS DE PAGAMENTO",
         fill=cor_marrom_logo,
         font=carregar_fonte(16, True)
     )
 
     draw.text(
-        (50, y_itens + 145),
+        (50, y_itens + 150),
         "Pix | Dinheiro | Cartão | Crypto",
         fill=cor_marrom_logo,
         font=carregar_fonte(16)
     )
 
     draw.text(
-        (50, y_itens + 170),
+        (50, y_itens + 175),
         "Cartão em até 12x (juros da maquininha)",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
     )
 
     draw.text(
-        (50, y_itens + 195),
+        (50, y_itens + 200),
         "Reserva mediante confirmação.",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
@@ -209,7 +220,7 @@ def gerar_imagem(cliente, data_entrega, itens):
     fonte_v = carregar_fonte(11)
     bbox_v = draw.textbbox((0, 0), texto_v, font=fonte_v)
     largura_v = bbox_v[2] - bbox_v[0]
-    draw.text((W - largura_v - 50, H - 155), texto_v, fill=(160, 160, 160), font=fonte_v)
+    draw.text((W - largura_v - 50, H - 170), texto_v, fill=(160, 160, 160), font=fonte_v)
 
     # --- RODAPÉ ---
     draw.rectangle([0, H - 135, W, H], fill=cor_fundo_logo)
