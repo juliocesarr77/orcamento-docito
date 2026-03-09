@@ -3,38 +3,53 @@ from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 import io
 import pytz
+from pathlib import Path
+
+# Caminho base do projeto
+BASE_DIR = Path(__file__).resolve().parent
+
 
 def carregar_fonte(tamanho, negrito=False):
     try:
-        if negrito:
-            return ImageFont.truetype("./DejaVuSans-Bold.ttf", tamanho)
-        else:
-            return ImageFont.truetype("./DejaVuSans.ttf", tamanho)
-    except:
+        nome_fonte = "DejaVuSans-Bold.ttf" if negrito else "DejaVuSans.ttf"
+        caminho_fonte = BASE_DIR / nome_fonte
+        return ImageFont.truetype(str(caminho_fonte), tamanho)
+    except Exception:
         return ImageFont.load_default()
+
 
 # --- 1. CONFIGURAÇÕES DA PÁGINA ---
 st.set_page_config(page_title="Docito Doceria - Orçamentos", page_icon="🍰")
 
 # --- 2. TABELA DE PREÇOS (CATÁLOGO) ---
 CATALOGO = {
-    "Brigadeiro Chocolate": 125.00, "Brigadeiro Ninho": 125.00,
-    "Beijinho": 125.00, "Meio a Meio": 125.00,
-    "Bicho de Pé": 125.00, "Moranguinho": 125.00,
-    "Cajuzinho": 130.00, "Ninho com Nutella": 150.00,
-    "Churros": 150.00, "Ferrero Rocher": 150.00,
-    "Maracujá": 150.00, "Limão": 150.00,
-    "Maçãzinha": 150.00, "Olho de Sogra": 150.00,
-    "Oreo": 150.00, "Meio Amargo": 160.00,
-    "Romeu e Julieta": 185.00, "Red Velvet": 185.00,
-    "Ninho Temático": 160.00, "Aplique": 150.00
+    "Brigadeiro Chocolate": 125.00,
+    "Brigadeiro Ninho": 125.00,
+    "Beijinho": 125.00,
+    "Meio a Meio": 125.00,
+    "Bicho de Pé": 125.00,
+    "Moranguinho": 125.00,
+    "Cajuzinho": 130.00,
+    "Ninho com Nutella": 150.00,
+    "Churros": 150.00,
+    "Ferrero Rocher": 150.00,
+    "Maracujá": 150.00,
+    "Limão": 150.00,
+    "Maçãzinha": 150.00,
+    "Olho de Sogra": 150.00,
+    "Oreo": 150.00,
+    "Meio Amargo": 160.00,
+    "Romeu e Julieta": 185.00,
+    "Red Velvet": 185.00,
+    "Ninho Temático": 160.00,
+    "Aplique": 150.00,
 }
 
 # --- 3. LÓGICA DE GERAÇÃO DA IMAGEM ---
 def gerar_imagem(cliente, data_entrega, itens):
     W = 600
     num_itens = len(itens)
-    
+
     if num_itens <= 8:
         tam_fonte_item = 18
         espaco_linha = 35
@@ -48,26 +63,29 @@ def gerar_imagem(cliente, data_entrega, itens):
     altura_cabecalho = 110
     altura_dados_cliente = 220
     altura_rodape = 150
-    H_dinamico = altura_cabecalho + altura_dados_cliente + (num_itens * espaco_linha) + altura_rodape
-    H = max(H_dinamico, 800)
+
+    # aumentei um pouco a área dinâmica por causa do total de doces
+    H_dinamico = altura_cabecalho + altura_dados_cliente + (num_itens * espaco_linha) + altura_rodape + 40
+    H = max(H_dinamico, 840)
 
     cor_fundo_logo = (255, 195, 153)
     cor_marrom_logo = (65, 38, 30)
     cor_destaque = (210, 80, 30)
-    
-    img = Image.new('RGB', (W, int(H)), color=(255, 255, 255))
+
+    img = Image.new("RGB", (W, int(H)), color=(255, 255, 255))
     draw = ImageDraw.Draw(img)
-    
+
     # --- CABEÇALHO ---
     draw.rectangle([0, 0, W, altura_cabecalho], fill=cor_fundo_logo)
     try:
-        logo = Image.open("logo.png").convert("RGBA")
+        caminho_logo = BASE_DIR / "logo.png"
+        logo = Image.open(caminho_logo).convert("RGBA")
         tamanho_logo = 130
         logo = logo.resize((tamanho_logo, tamanho_logo))
         pos_x = (W - tamanho_logo) // 2
         pos_y = (altura_cabecalho - tamanho_logo) // 2
         img.paste(logo, (pos_x, pos_y), logo)
-    except:
+    except Exception:
         draw.text((180, 40), "DOCITO DOCERIA", fill=cor_marrom_logo, font=carregar_fonte(30, True))
 
     # --- DADOS DO CLIENTE ---
@@ -76,26 +94,58 @@ def gerar_imagem(cliente, data_entrega, itens):
     draw.text((50, y_pos + 50), f"CLIENTE: {cliente.upper()}", fill=cor_marrom_logo, font=carregar_fonte(18, True))
     draw.text((50, y_pos + 80), f"ENTREGA: {data_entrega.strftime('%d/%m/%Y')}", fill=cor_destaque, font=carregar_fonte(18, True))
     draw.line((50, y_pos + 115, 550, y_pos + 115), fill=cor_fundo_logo, width=3)
-    
+
     # --- LISTA DE ITENS ---
     y_itens = y_pos + 140
     total_geral = 0
+    total_doces = 0
     fonte_item = carregar_fonte(tam_fonte_item)
-    
+
     for item in itens:
-        subtotal = (item['preco_cento'] / 100) * item['qtd']
+        subtotal = (item["preco_cento"] / 100) * item["qtd"]
         total_geral += subtotal
-        draw.text((50, y_itens), f"{item['qtd']}un - {item['produto']}", fill=cor_marrom_logo, font=fonte_item)
-        draw.text((450, y_itens), f"R$ {subtotal:>8.2f}", fill=cor_marrom_logo, font=fonte_item)
+        total_doces += item["qtd"]
+
+        texto_item = f"{item['qtd']}un - {item['produto']}"
+        texto_valor = f"R$ {subtotal:.2f}"
+
+        draw.text((50, y_itens), texto_item, fill=cor_marrom_logo, font=fonte_item)
+
+        # alinhar valor à direita
+        bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_item)
+        largura_valor = bbox_valor[2] - bbox_valor[0]
+        x_valor = 550 - largura_valor
+        draw.text((x_valor, y_itens), texto_valor, fill=cor_marrom_logo, font=fonte_item)
+
         y_itens += espaco_linha
-    
+
     # --- TOTAL ---
     draw.line((50, y_itens + 15, 550, y_itens + 15), fill=cor_fundo_logo, width=3)
-    draw.text((50, y_itens + 35), "TOTAL DO PEDIDO", fill=cor_marrom_logo, font=carregar_fonte(22, True))
-    draw.text((400, y_itens + 35), f"R$ {total_geral:.2f}", fill=cor_destaque, font=carregar_fonte(24, True))
+
+    draw.text(
+        (50, y_itens + 35),
+        f"TOTAL DE DOCES: {total_doces}",
+        fill=cor_marrom_logo,
+        font=carregar_fonte(18, True),
+    )
+
+    draw.text(
+        (50, y_itens + 70),
+        "TOTAL DO PEDIDO",
+        fill=cor_marrom_logo,
+        font=carregar_fonte(22, True),
+    )
+
+    texto_total = f"R$ {total_geral:.2f}"
+    fonte_total = carregar_fonte(24, True)
+    bbox_total = draw.textbbox((0, 0), texto_total, font=fonte_total)
+    largura_total = bbox_total[2] - bbox_total[0]
+    x_total = 550 - largura_total
+
+    draw.text((x_total, y_itens + 70), texto_total, fill=cor_destaque, font=fonte_total)
 
     # --- VALIDADE COM FUSO HORÁRIO BRASIL ---
-    fuso_br = pytz.timezone('America/Sao_Paulo')
+    fuso_br = pytz.timezone("America/Sao_Paulo")
     agora = datetime.now(fuso_br)
     texto_v = f"Gerado em: {agora.strftime('%d/%m/%Y %H:%M')} | Validade: 15 dias"
     fonte_v = carregar_fonte(11)
@@ -104,14 +154,14 @@ def gerar_imagem(cliente, data_entrega, itens):
     draw.text((W - largura_v - 50, H - 155), texto_v, fill=(160, 160, 160), font=fonte_v)
 
     # --- RODAPÉ ---
-    draw.rectangle([0, H-135, W, H], fill=cor_fundo_logo)
+    draw.rectangle([0, H - 135, W, H], fill=cor_fundo_logo)
     avisos = [
         "• Forminhas 4 pétalas (branca) inclusas.",
         "• Forminhas decorativas fornecidas pelo cliente",
-        "  terão custo adicional por caixa extra utilizada."
+        "  terão custo adicional por caixa extra utilizada.",
     ]
     for i, aviso in enumerate(avisos):
-        draw.text((45, H-120 + (i*22)), aviso, fill=cor_marrom_logo, font=carregar_fonte(15))
+        draw.text((45, H - 120 + (i * 22)), aviso, fill=cor_marrom_logo, font=carregar_fonte(15))
 
     y_linha = H - 55
     draw.line((45, y_linha, 555, y_linha), fill=cor_marrom_logo, width=1)
@@ -129,15 +179,16 @@ def gerar_imagem(cliente, data_entrega, itens):
     buffer.seek(0)
     return buffer
 
+
 # --- 4. INTERFACE STREAMLIT ---
 try:
-    st.image("logo.png", width=100)
-except:
+    st.image(str(BASE_DIR / "logo.png"), width=100)
+except Exception:
     st.title("🍰 DOCITO DOCERIA")
 
 st.title("Gerador de Orçamentos")
 
-if 'carrinho' not in st.session_state:
+if "carrinho" not in st.session_state:
     st.session_state.carrinho = []
 
 col_c1, col_c2 = st.columns(2)
@@ -157,14 +208,15 @@ with c2:
 with c3:
     st.write(" ")
     if st.button("➕ Adicionar"):
-        st.session_state.carrinho.append({"produto": p, "qtd": q, "preco_cento": CATALOGO[p]})
+        st.session_state.carrinho.append(
+            {"produto": p, "qtd": int(q), "preco_cento": CATALOGO[p]}
+        )
         st.rerun()
 
 # --- LISTAGEM E EDIÇÃO ---
 if st.session_state.carrinho:
     st.subheader("🛒 Itens Selecionados")
-    
-    # Cabeçalho da Lista
+
     h_col1, h_col2, h_col3 = st.columns([3, 1, 0.5])
     h_col1.caption("Produto")
     h_col2.caption("Qtd (Editar)")
@@ -172,49 +224,41 @@ if st.session_state.carrinho:
 
     for i, item in enumerate(st.session_state.carrinho):
         col_prod, col_qtd, col_bt = st.columns([3, 1, 0.5])
-        
+
         col_prod.write(f"**{item['produto']}**")
-        
-        # Campo de edição de quantidade
+
         nova_qtd = col_qtd.number_input(
-            "Qtd", 
-            min_value=1, 
-            value=int(item['qtd']), 
-            key=f"edit_{i}", 
-            label_visibility="collapsed"
+            "Qtd",
+            min_value=1,
+            value=int(item["qtd"]),
+            key=f"edit_{i}",
+            label_visibility="collapsed",
         )
-        
-        # Se a quantidade mudar, atualiza e recarrega
-        if nova_qtd != item['qtd']:
-            st.session_state.carrinho[i]['qtd'] = nova_qtd
+
+        if nova_qtd != item["qtd"]:
+            st.session_state.carrinho[i]["qtd"] = int(nova_qtd)
             st.rerun()
 
-        # Botão para excluir item
         if col_bt.button("❌", key=f"del_{i}"):
             st.session_state.carrinho.pop(i)
             st.rerun()
-    
+
     st.divider()
-    
+
     if st.button("LIMPAR TUDO", type="secondary"):
         st.session_state.carrinho = []
         st.rerun()
 
     if st.button("GERAR IMAGEM FINAL", type="primary", use_container_width=True):
-        if cliente:
-            with st.spinner('Gerando orçamento...'):
+        if cliente.strip():
+            with st.spinner("Gerando orçamento..."):
                 res = gerar_imagem(cliente, data_ent, st.session_state.carrinho)
                 st.image(res)
-                st.download_button("📥 Baixar Orçamento", res, f"Docito_{cliente}.png", "image/png")
+                st.download_button(
+                    "📥 Baixar Orçamento",
+                    res,
+                    f"Docito_{cliente.strip()}.png",
+                    "image/png",
+                )
         else:
             st.warning("Por favor, preencha o nome da cliente!")
-
-
-
-
-
-
-
-
-
-
