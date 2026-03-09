@@ -6,7 +6,6 @@ import pytz
 from pathlib import Path
 import base64
 
-# Caminho base do projeto
 BASE_DIR = Path(__file__).resolve().parent
 
 
@@ -19,10 +18,8 @@ def carregar_fonte(tamanho, negrito=False):
         return ImageFont.load_default()
 
 
-# --- 1. CONFIGURAÇÕES DA PÁGINA ---
 st.set_page_config(page_title="Docito Doceria - Orçamentos", page_icon="🍰")
 
-# --- 2. TABELA DE PREÇOS (CATÁLOGO) ---
 CATALOGO = {
     "Brigadeiro Chocolate": 125.00,
     "Brigadeiro Ninho": 125.00,
@@ -47,7 +44,6 @@ CATALOGO = {
 }
 
 
-# --- 3. LÓGICA DE GERAÇÃO DA IMAGEM ---
 def gerar_imagem(cliente, data_entrega, itens):
     W = 600
     num_itens = len(itens)
@@ -63,26 +59,27 @@ def gerar_imagem(cliente, data_entrega, itens):
         espaco_linha = 25
 
     altura_cabecalho = 110
-    altura_dados_cliente = 220
-    altura_rodape = 150
-
-    # Espaço reservado para:
-    # total + linha + formas de pagamento + observação + validade
-    altura_bloco_final = 260
-
-    H_dinamico = (
-        altura_cabecalho
-        + altura_dados_cliente
-        + (num_itens * espaco_linha)
-        + altura_bloco_final
-        + altura_rodape
-    )
-
-    H = max(H_dinamico, 950)
+    altura_rodape = 135
+    margem_inferior = 20
 
     cor_fundo_logo = (255, 195, 153)
     cor_marrom_logo = (65, 38, 30)
     cor_destaque = (210, 80, 30)
+
+    # --- CÁLCULO ROBUSTO DA ALTURA ---
+    y_pos = altura_cabecalho + 30
+    y_itens_inicio = y_pos + 140
+    y_itens_fim = y_itens_inicio + (num_itens * espaco_linha)
+
+    # Último elemento do bloco de conteúdo antes da área "Gerado em..."
+    y_fim_conteudo = y_itens_fim + 200  # reserva para total + pagamento + reserva
+
+    # Topo do rodapé precisa ficar abaixo do conteúdo
+    # com folga para o "Gerado em..."
+    y_topo_rodape = max(y_fim_conteudo + 80, 760)
+
+    # Altura total da imagem
+    H = y_topo_rodape + altura_rodape + margem_inferior
 
     img = Image.new("RGB", (W, int(H)), color=(255, 255, 255))
     draw = ImageDraw.Draw(img)
@@ -106,7 +103,6 @@ def gerar_imagem(cliente, data_entrega, itens):
         )
 
     # --- DADOS DO CLIENTE ---
-    y_pos = altura_cabecalho + 30
     draw.text(
         (50, y_pos),
         "ORÇAMENTO DE DOCES",
@@ -128,7 +124,7 @@ def gerar_imagem(cliente, data_entrega, itens):
     draw.line((50, y_pos + 115, 550, y_pos + 115), fill=cor_fundo_logo, width=3)
 
     # --- LISTA DE ITENS ---
-    y_itens = y_pos + 140
+    y_itens = y_itens_inicio
     total_geral = 0
     total_doces = 0
     fonte_item = carregar_fonte(tam_fonte_item)
@@ -143,7 +139,6 @@ def gerar_imagem(cliente, data_entrega, itens):
 
         draw.text((50, y_itens), texto_item, fill=cor_marrom_logo, font=fonte_item)
 
-        # Alinhar valor à direita
         bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_item)
         largura_valor = bbox_valor[2] - bbox_valor[0]
         x_valor = 550 - largura_valor
@@ -181,7 +176,6 @@ def gerar_imagem(cliente, data_entrega, itens):
         font=fonte_total
     )
 
-    # Linha com um pouco mais de espaço abaixo do valor total
     draw.line((50, y_itens + 110, 550, y_itens + 110), fill=cor_fundo_logo, width=2)
 
     # --- FORMAS DE PAGAMENTO ---
@@ -213,35 +207,53 @@ def gerar_imagem(cliente, data_entrega, itens):
         font=carregar_fonte(14)
     )
 
-    # --- VALIDADE COM FUSO HORÁRIO BRASIL ---
+    # --- VALIDADE ---
     fuso_br = pytz.timezone("America/Sao_Paulo")
     agora = datetime.now(fuso_br)
     texto_v = f"Gerado em: {agora.strftime('%d/%m/%Y %H:%M')} | Validade: 15 dias"
     fonte_v = carregar_fonte(11)
     bbox_v = draw.textbbox((0, 0), texto_v, font=fonte_v)
     largura_v = bbox_v[2] - bbox_v[0]
-    draw.text((W - largura_v - 50, H - 170), texto_v, fill=(160, 160, 160), font=fonte_v)
+
+    # Posiciona acima do rodapé, com segurança
+    draw.text(
+        (W - largura_v - 50, y_topo_rodape - 25),
+        texto_v,
+        fill=(160, 160, 160),
+        font=fonte_v
+    )
 
     # --- RODAPÉ ---
-    draw.rectangle([0, H - 135, W, H], fill=cor_fundo_logo)
+    draw.rectangle([0, y_topo_rodape, W, H], fill=cor_fundo_logo)
+
     avisos = [
         "• Forminhas 4 pétalas (branca) inclusas.",
         "• Forminhas decorativas fornecidas pelo cliente",
         "  terão custo adicional por caixa extra utilizada.",
     ]
     for i, aviso in enumerate(avisos):
-        draw.text((45, H - 120 + (i * 22)), aviso, fill=cor_marrom_logo, font=carregar_fonte(15))
+        draw.text(
+            (45, y_topo_rodape + 15 + (i * 22)),
+            aviso,
+            fill=cor_marrom_logo,
+            font=carregar_fonte(15)
+        )
 
-    y_linha = H - 55
+    y_linha = y_topo_rodape + 80
     draw.line((45, y_linha, 555, y_linha), fill=cor_marrom_logo, width=1)
 
-    # --- CONTATOS CENTRALIZADOS ---
     contatos = "Instagram: @docito_doceria123 | WhatsApp: (37) 99996-5194"
     fonte_contatos = carregar_fonte(14, True)
     bbox_contatos = draw.textbbox((0, 0), contatos, font=fonte_contatos)
     largura_contatos = bbox_contatos[2] - bbox_contatos[0]
     pos_x_contatos = (W - largura_contatos) // 2
-    draw.text((pos_x_contatos, y_linha + 12), contatos, fill=cor_marrom_logo, font=fonte_contatos)
+
+    draw.text(
+        (pos_x_contatos, y_linha + 12),
+        contatos,
+        fill=cor_marrom_logo,
+        font=fonte_contatos
+    )
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
@@ -249,7 +261,6 @@ def gerar_imagem(cliente, data_entrega, itens):
     return buffer
 
 
-# --- 4. INTERFACE STREAMLIT ---
 try:
     st.image(str(BASE_DIR / "logo.png"), width=100)
 except Exception:
@@ -268,7 +279,6 @@ with col_c2:
 
 st.divider()
 
-# --- ADICIONAR ITEM ---
 c1, c2, c3 = st.columns([3, 1, 1])
 with c1:
     p = st.selectbox("Produto", list(CATALOGO.keys()))
@@ -282,7 +292,6 @@ with c3:
         )
         st.rerun()
 
-# --- LISTAGEM E EDIÇÃO ---
 if st.session_state.carrinho:
     st.subheader("🛒 Itens Selecionados")
 
@@ -367,6 +376,5 @@ if st.session_state.carrinho:
                     </script>
                     """
                     st.components.v1.html(copy_script, height=55)
-
         else:
             st.warning("Por favor, preencha o nome da cliente!")
