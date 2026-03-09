@@ -5,9 +5,11 @@ import io
 import pytz
 
 def carregar_fonte(tamanho, negrito=False):
-    fonte = "DejaVuSans-Bold.ttf" if negrito else "DejaVuSans.ttf"
     try:
-        return ImageFont.truetype(fonte, tamanho)
+        if negrito:
+            return ImageFont.truetype("./DejaVuSans-Bold.ttf", tamanho)
+        else:
+            return ImageFont.truetype("./DejaVuSans.ttf", tamanho)
     except:
         return ImageFont.load_default()
 
@@ -206,6 +208,7 @@ if st.session_state.carrinho:
                 st.download_button("📥 Baixar Orçamento", res, f"Docito_{cliente}.png", "image/png")
         else:
             st.warning("Por favor, preencha o nome da cliente!")
+
 
 
 
