@@ -45,6 +45,7 @@ CATALOGO = {
     "Aplique": 150.00,
 }
 
+
 # --- 3. LÓGICA DE GERAÇÃO DA IMAGEM ---
 def gerar_imagem(cliente, data_entrega, itens):
     W = 600
@@ -64,9 +65,9 @@ def gerar_imagem(cliente, data_entrega, itens):
     altura_dados_cliente = 220
     altura_rodape = 150
 
-    # aumentei um pouco a área dinâmica por causa do total de doces
-    H_dinamico = altura_cabecalho + altura_dados_cliente + (num_itens * espaco_linha) + altura_rodape + 40
-    H = max(H_dinamico, 840)
+    # Aumentei a área dinâmica para caber total + pagamento
+    H_dinamico = altura_cabecalho + altura_dados_cliente + (num_itens * espaco_linha) + altura_rodape + 90
+    H = max(H_dinamico, 880)
 
     cor_fundo_logo = (255, 195, 153)
     cor_marrom_logo = (65, 38, 30)
@@ -86,13 +87,33 @@ def gerar_imagem(cliente, data_entrega, itens):
         pos_y = (altura_cabecalho - tamanho_logo) // 2
         img.paste(logo, (pos_x, pos_y), logo)
     except Exception:
-        draw.text((180, 40), "DOCITO DOCERIA", fill=cor_marrom_logo, font=carregar_fonte(30, True))
+        draw.text(
+            (180, 40),
+            "DOCITO DOCERIA",
+            fill=cor_marrom_logo,
+            font=carregar_fonte(30, True)
+        )
 
     # --- DADOS DO CLIENTE ---
     y_pos = altura_cabecalho + 30
-    draw.text((50, y_pos), "ORÇAMENTO DE DOCES", fill=cor_marrom_logo, font=carregar_fonte(26, True))
-    draw.text((50, y_pos + 50), f"CLIENTE: {cliente.upper()}", fill=cor_marrom_logo, font=carregar_fonte(18, True))
-    draw.text((50, y_pos + 80), f"ENTREGA: {data_entrega.strftime('%d/%m/%Y')}", fill=cor_destaque, font=carregar_fonte(18, True))
+    draw.text(
+        (50, y_pos),
+        "ORÇAMENTO DE DOCES",
+        fill=cor_marrom_logo,
+        font=carregar_fonte(26, True)
+    )
+    draw.text(
+        (50, y_pos + 50),
+        f"CLIENTE: {cliente.upper()}",
+        fill=cor_marrom_logo,
+        font=carregar_fonte(18, True)
+    )
+    draw.text(
+        (50, y_pos + 80),
+        f"ENTREGA: {data_entrega.strftime('%d/%m/%Y')}",
+        fill=cor_destaque,
+        font=carregar_fonte(18, True)
+    )
     draw.line((50, y_pos + 115, 550, y_pos + 115), fill=cor_fundo_logo, width=3)
 
     # --- LISTA DE ITENS ---
@@ -111,7 +132,7 @@ def gerar_imagem(cliente, data_entrega, itens):
 
         draw.text((50, y_itens), texto_item, fill=cor_marrom_logo, font=fonte_item)
 
-        # alinhar valor à direita
+        # Alinhar valor à direita
         bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_item)
         largura_valor = bbox_valor[2] - bbox_valor[0]
         x_valor = 550 - largura_valor
@@ -136,27 +157,33 @@ def gerar_imagem(cliente, data_entrega, itens):
         font=carregar_fonte(22, True),
     )
 
-    draw.text(
-    (50, y_itens + 110),
-    "Pagamento: Pix | Dinheiro | Cartão Débito e Crédito | Cripto",
-    fill=cor_marrom_logo,
-    font=carregar_fonte(16)
-)
-
-draw.text(
-    (50, y_itens + 135),
-    "(até 12x com juros da maquininha)",
-    fill=cor_marrom_logo,
-    font=carregar_fonte(14)
-)
-
     texto_total = f"R$ {total_geral:.2f}"
     fonte_total = carregar_fonte(24, True)
     bbox_total = draw.textbbox((0, 0), texto_total, font=fonte_total)
     largura_total = bbox_total[2] - bbox_total[0]
     x_total = 550 - largura_total
 
-    draw.text((x_total, y_itens + 70), texto_total, fill=cor_destaque, font=fonte_total)
+    draw.text(
+        (x_total, y_itens + 70),
+        texto_total,
+        fill=cor_destaque,
+        font=fonte_total
+    )
+
+    # --- FORMAS DE PAGAMENTO ---
+    draw.text(
+        (50, y_itens + 110),
+        "Pagamento: Pix | Dinheiro | Cartão Débito e Crédito | Cripto",
+        fill=cor_marrom_logo,
+        font=carregar_fonte(16)
+    )
+
+    draw.text(
+        (50, y_itens + 135),
+        "(até 12x com juros da maquininha)",
+        fill=cor_marrom_logo,
+        font=carregar_fonte(14)
+    )
 
     # --- VALIDADE COM FUSO HORÁRIO BRASIL ---
     fuso_br = pytz.timezone("America/Sao_Paulo")
@@ -276,11 +303,3 @@ if st.session_state.carrinho:
                 )
         else:
             st.warning("Por favor, preencha o nome da cliente!")
-
-
-
-
-
-
-
-
