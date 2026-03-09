@@ -145,7 +145,7 @@ def gerar_imagem(cliente, data_entrega, itens):
 
 draw.text(
     (50, y_itens + 135),
-                "(até 12x com juros da maquininha)",
+    "(até 12x com juros da maquininha)",
     fill=cor_marrom_logo,
     font=carregar_fonte(14)
 )
@@ -276,6 +276,7 @@ if st.session_state.carrinho:
                 )
         else:
             st.warning("Por favor, preencha o nome da cliente!")
+
 
 
 
