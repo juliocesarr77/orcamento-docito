@@ -172,8 +172,14 @@ def gerar_imagem(cliente, data_entrega, itens):
 
     # --- FORMAS DE PAGAMENTO ---
     draw.text(
+    (50, y_itens + 110),
+    "FORMAS DE PAGAMENTO",
+    fill=cor_marrom_logo,
+    font=carregar_fonte(18, True)
+)
+    draw.text(
         (50, y_itens + 110),
-        "Formas de Pagamento: Pix | Dinheiro | Cartão | Crypto",
+        "Pix | Dinheiro | Cartão | Crypto",
         fill=cor_marrom_logo,
         font=carregar_fonte(16)
     )
@@ -303,6 +309,7 @@ if st.session_state.carrinho:
                 )
         else:
             st.warning("Por favor, preencha o nome da cliente!")
+
 
 
 
