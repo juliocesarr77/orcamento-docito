@@ -5,6 +5,7 @@ import io
 import pytz
 from pathlib import Path
 import base64
+import re
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -18,7 +19,57 @@ def carregar_fonte(tamanho, negrito=False):
         return ImageFont.load_default()
 
 
-st.set_page_config(page_title="Docito Doceria - Orçamentos", page_icon="🍰")
+def formatar_real(valor):
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def calcular_desconto(valor_base, desconto_str):
+    """
+    Aceita:
+    - 10%
+    - -10%
+    - R$2
+    - -R$2
+    - 2
+    - 2,50
+
+    Retorna:
+    desconto_aplicado (float), descricao_formatada (str)
+    """
+    if not desconto_str:
+        return 0.0, ""
+
+    texto = str(desconto_str).strip().lower()
+    if not texto:
+        return 0.0, ""
+
+    # Remove espaços
+    texto = texto.replace(" ", "")
+
+    try:
+        # Desconto percentual
+        if "%" in texto:
+            numero = texto.replace("%", "").replace("-", "").replace(",", ".")
+            percentual = float(numero)
+            desconto = valor_base * (percentual / 100)
+            desconto = min(desconto, valor_base)
+            return desconto, f"{percentual:.0f}%"
+
+        # Desconto em reais
+        texto_limpo = (
+            texto.replace("r$", "")
+            .replace("-", "")
+            .replace(".", "")
+            .replace(",", ".")
+        )
+
+        valor = float(texto_limpo)
+        desconto = min(valor, valor_base)
+        return desconto, formatar_real(desconto)
+
+    except Exception:
+        return 0.0, ""
+
 
 CATALOGO = {
     "Brigadeiro Chocolate": 125.00,
@@ -44,41 +95,36 @@ CATALOGO = {
 }
 
 
-def gerar_imagem(cliente, data_entrega, itens):
-    W = 600
+def gerar_imagem(cliente, data_entrega, itens, desconto_geral_str=""):
+    W = 700
     num_itens = len(itens)
 
     if num_itens <= 8:
         tam_fonte_item = 18
-        espaco_linha = 35
+        espaco_linha = 42
     elif num_itens <= 12:
         tam_fonte_item = 16
-        espaco_linha = 30
+        espaco_linha = 36
     else:
         tam_fonte_item = 14
-        espaco_linha = 25
+        espaco_linha = 30
 
     altura_cabecalho = 110
-    altura_rodape = 135
+    altura_rodape = 150
     margem_inferior = 20
 
     cor_fundo_logo = (255, 195, 153)
     cor_marrom_logo = (65, 38, 30)
     cor_destaque = (210, 80, 30)
+    cor_desconto = (180, 40, 40)
+    cor_cinza = (140, 140, 140)
 
-    # --- CÁLCULO ROBUSTO DA ALTURA ---
     y_pos = altura_cabecalho + 30
     y_itens_inicio = y_pos + 140
     y_itens_fim = y_itens_inicio + (num_itens * espaco_linha)
 
-    # Último elemento do bloco de conteúdo antes da área "Gerado em..."
-    y_fim_conteudo = y_itens_fim + 200  # reserva para total + pagamento + reserva
-
-    # Topo do rodapé precisa ficar abaixo do conteúdo
-    # com folga para o "Gerado em..."
-    y_topo_rodape = max(y_fim_conteudo + 80, 760)
-
-    # Altura total da imagem
+    y_fim_conteudo = y_itens_fim + 300
+    y_topo_rodape = max(y_fim_conteudo + 80, 900)
     H = y_topo_rodape + altura_rodape + margem_inferior
 
     img = Image.new("RGB", (W, int(H)), color=(255, 255, 255))
@@ -96,7 +142,7 @@ def gerar_imagem(cliente, data_entrega, itens):
         img.paste(logo, (pos_x, pos_y), logo)
     except Exception:
         draw.text(
-            (180, 40),
+            (220, 40),
             "DOCITO DOCERIA",
             fill=cor_marrom_logo,
             font=carregar_fonte(30, True)
@@ -121,33 +167,58 @@ def gerar_imagem(cliente, data_entrega, itens):
         fill=cor_destaque,
         font=carregar_fonte(18, True)
     )
-    draw.line((50, y_pos + 115, 550, y_pos + 115), fill=cor_fundo_logo, width=3)
+    draw.line((50, y_pos + 115, 650, y_pos + 115), fill=cor_fundo_logo, width=3)
 
     # --- LISTA DE ITENS ---
     y_itens = y_itens_inicio
-    total_geral = 0
+    total_bruto = 0
+    total_desconto_itens = 0
     total_doces = 0
     fonte_item = carregar_fonte(tam_fonte_item)
 
     for item in itens:
-        subtotal = (item["preco_cento"] / 100) * item["qtd"]
-        total_geral += subtotal
+        subtotal_bruto = (item["preco_cento"] / 100) * item["qtd"]
+        desconto_item_valor, desconto_item_desc = calcular_desconto(
+            subtotal_bruto, item.get("desconto", "")
+        )
+        subtotal_final = subtotal_bruto - desconto_item_valor
+
+        total_bruto += subtotal_bruto
+        total_desconto_itens += desconto_item_valor
         total_doces += item["qtd"]
 
         texto_item = f"{item['qtd']}un - {item['produto']}"
-        texto_valor = f"R$ {subtotal:.2f}"
+        if desconto_item_desc:
+            texto_item += f" (-{desconto_item_desc})"
+
+        texto_valor = formatar_real(subtotal_final)
 
         draw.text((50, y_itens), texto_item, fill=cor_marrom_logo, font=fonte_item)
 
         bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_item)
         largura_valor = bbox_valor[2] - bbox_valor[0]
-        x_valor = 550 - largura_valor
+        x_valor = 650 - largura_valor
         draw.text((x_valor, y_itens), texto_valor, fill=cor_marrom_logo, font=fonte_item)
+
+        if desconto_item_valor > 0:
+            detalhe_desc = f"Original: {formatar_real(subtotal_bruto)} | Desconto: -{formatar_real(desconto_item_valor)}"
+            draw.text(
+                (65, y_itens + 20),
+                detalhe_desc,
+                fill=cor_cinza,
+                font=carregar_fonte(max(tam_fonte_item - 4, 11))
+            )
 
         y_itens += espaco_linha
 
-    # --- TOTAL ---
-    draw.line((50, y_itens + 15, 550, y_itens + 15), fill=cor_fundo_logo, width=3)
+    total_com_desconto_itens = total_bruto - total_desconto_itens
+    desconto_geral_valor, desconto_geral_desc = calcular_desconto(
+        total_com_desconto_itens, desconto_geral_str
+    )
+    total_final = total_com_desconto_itens - desconto_geral_valor
+
+    # --- TOTAIS ---
+    draw.line((50, y_itens + 15, 650, y_itens + 15), fill=cor_fundo_logo, width=3)
 
     draw.text(
         (50, y_itens + 35),
@@ -158,50 +229,89 @@ def gerar_imagem(cliente, data_entrega, itens):
 
     draw.text(
         (50, y_itens + 70),
-        "TOTAL DO PEDIDO",
+        "Subtotal",
         fill=cor_marrom_logo,
-        font=carregar_fonte(22, True),
+        font=carregar_fonte(18, True),
+    )
+    draw.text(
+        (520, y_itens + 70),
+        formatar_real(total_bruto),
+        fill=cor_marrom_logo,
+        font=carregar_fonte(18, True),
     )
 
-    texto_total = f"R$ {total_geral:.2f}"
-    fonte_total = carregar_fonte(24, True)
-    bbox_total = draw.textbbox((0, 0), texto_total, font=fonte_total)
-    largura_total = bbox_total[2] - bbox_total[0]
-    x_total = 550 - largura_total
+    draw.text(
+        (50, y_itens + 105),
+        "Desconto por itens",
+        fill=cor_desconto,
+        font=carregar_fonte(18, True),
+    )
+    draw.text(
+        (520, y_itens + 105),
+        f"-{formatar_real(total_desconto_itens)}",
+        fill=cor_desconto,
+        font=carregar_fonte(18, True),
+    )
 
     draw.text(
-        (x_total, y_itens + 70),
+        (50, y_itens + 140),
+        "Desconto geral",
+        fill=cor_desconto,
+        font=carregar_fonte(18, True),
+    )
+    draw.text(
+        (520, y_itens + 140),
+        f"-{formatar_real(desconto_geral_valor)}",
+        fill=cor_desconto,
+        font=carregar_fonte(18, True),
+    )
+
+    draw.line((50, y_itens + 180, 650, y_itens + 180), fill=cor_fundo_logo, width=2)
+
+    draw.text(
+        (50, y_itens + 205),
+        "TOTAL DO PEDIDO",
+        fill=cor_marrom_logo,
+        font=carregar_fonte(24, True),
+    )
+
+    texto_total = formatar_real(total_final)
+    fonte_total = carregar_fonte(28, True)
+    bbox_total = draw.textbbox((0, 0), texto_total, font=fonte_total)
+    largura_total = bbox_total[2] - bbox_total[0]
+    x_total = 650 - largura_total
+
+    draw.text(
+        (x_total, y_itens + 205),
         texto_total,
         fill=cor_destaque,
         font=fonte_total
     )
 
-    draw.line((50, y_itens + 110, 550, y_itens + 110), fill=cor_fundo_logo, width=2)
-
     # --- FORMAS DE PAGAMENTO ---
     draw.text(
-        (50, y_itens + 125),
+        (50, y_itens + 255),
         "FORMAS DE PAGAMENTO",
         fill=cor_marrom_logo,
         font=carregar_fonte(16, True)
     )
 
     draw.text(
-        (50, y_itens + 150),
+        (50, y_itens + 280),
         "Pix | Dinheiro | Cartão | Crypto",
         fill=cor_marrom_logo,
         font=carregar_fonte(16)
     )
 
     draw.text(
-        (50, y_itens + 175),
+        (50, y_itens + 305),
         "Cartão em até 12x (juros da maquininha)",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
     )
 
     draw.text(
-        (50, y_itens + 200),
+        (50, y_itens + 330),
         "Reserva mediante confirmação.",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
@@ -215,7 +325,6 @@ def gerar_imagem(cliente, data_entrega, itens):
     bbox_v = draw.textbbox((0, 0), texto_v, font=fonte_v)
     largura_v = bbox_v[2] - bbox_v[0]
 
-    # Posiciona acima do rodapé, com segurança
     draw.text(
         (W - largura_v - 50, y_topo_rodape - 25),
         texto_v,
@@ -239,8 +348,8 @@ def gerar_imagem(cliente, data_entrega, itens):
             font=carregar_fonte(15)
         )
 
-    y_linha = y_topo_rodape + 80
-    draw.line((45, y_linha, 555, y_linha), fill=cor_marrom_logo, width=1)
+    y_linha = y_topo_rodape + 85
+    draw.line((45, y_linha, 655, y_linha), fill=cor_marrom_logo, width=1)
 
     contatos = "Instagram: @docito_doceria123 | WhatsApp: (37) 99996-5194"
     fonte_contatos = carregar_fonte(14, True)
@@ -261,6 +370,8 @@ def gerar_imagem(cliente, data_entrega, itens):
     return buffer
 
 
+st.set_page_config(page_title="Docito Doceria - Orçamentos", page_icon="🍰")
+
 try:
     st.image(str(BASE_DIR / "logo.png"), width=100)
 except Exception:
@@ -271,6 +382,9 @@ st.title("Gerador de Orçamentos")
 if "carrinho" not in st.session_state:
     st.session_state.carrinho = []
 
+if "desconto_geral" not in st.session_state:
+    st.session_state.desconto_geral = ""
+
 col_c1, col_c2 = st.columns(2)
 with col_c1:
     cliente = st.text_input("Nome da Cliente")
@@ -279,31 +393,62 @@ with col_c2:
 
 st.divider()
 
-c1, c2, c3 = st.columns([3, 1, 1])
+c1, c2, c3, c4 = st.columns([3, 1, 1.3, 1])
 with c1:
     p = st.selectbox("Produto", list(CATALOGO.keys()))
 with c2:
     q = st.number_input("Qtd", min_value=1, value=50)
 with c3:
+    desconto_novo_item = st.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2")
+with c4:
     st.write(" ")
     if st.button("➕ Adicionar"):
         st.session_state.carrinho.append(
-            {"produto": p, "qtd": int(q), "preco_cento": CATALOGO[p]}
+            {
+                "produto": p,
+                "qtd": int(q),
+                "preco_cento": CATALOGO[p],
+                "desconto": desconto_novo_item.strip(),
+            }
         )
         st.rerun()
+
+st.divider()
+
+st.subheader("Desconto geral do pedido")
+desconto_geral = st.text_input(
+    "Desconto Geral",
+    value=st.session_state.desconto_geral,
+    placeholder="Ex.: 10% ou R$20"
+)
+st.session_state.desconto_geral = desconto_geral
 
 if st.session_state.carrinho:
     st.subheader("🛒 Itens Selecionados")
 
-    h_col1, h_col2, h_col3 = st.columns([3, 1, 0.5])
+    h_col1, h_col2, h_col3, h_col4 = st.columns([3, 1, 1.4, 0.5])
     h_col1.caption("Produto")
-    h_col2.caption("Qtd (Editar)")
-    h_col3.write("")
+    h_col2.caption("Qtd")
+    h_col3.caption("Desconto")
+    h_col4.write("")
+
+    total_bruto_preview = 0
+    total_desc_itens_preview = 0
 
     for i, item in enumerate(st.session_state.carrinho):
-        col_prod, col_qtd, col_bt = st.columns([3, 1, 0.5])
+        col_prod, col_qtd, col_desc, col_bt = st.columns([3, 1, 1.4, 0.5])
 
-        col_prod.write(f"**{item['produto']}**")
+        subtotal_bruto = (item["preco_cento"] / 100) * item["qtd"]
+        desconto_item_valor, _ = calcular_desconto(subtotal_bruto, item.get("desconto", ""))
+        subtotal_final = subtotal_bruto - desconto_item_valor
+
+        total_bruto_preview += subtotal_bruto
+        total_desc_itens_preview += desconto_item_valor
+
+        col_prod.write(
+            f"**{item['produto']}**  \n"
+            f"{formatar_real(subtotal_bruto)} → **{formatar_real(subtotal_final)}**"
+        )
 
         nova_qtd = col_qtd.number_input(
             "Qtd",
@@ -313,24 +458,58 @@ if st.session_state.carrinho:
             label_visibility="collapsed",
         )
 
+        novo_desc = col_desc.text_input(
+            "Desconto",
+            value=item.get("desconto", ""),
+            key=f"desc_{i}",
+            placeholder="10% ou R$2",
+            label_visibility="collapsed",
+        )
+
+        alterou = False
+
         if nova_qtd != item["qtd"]:
             st.session_state.carrinho[i]["qtd"] = int(nova_qtd)
+            alterou = True
+
+        if novo_desc != item.get("desconto", ""):
+            st.session_state.carrinho[i]["desconto"] = novo_desc.strip()
+            alterou = True
+
+        if alterou:
             st.rerun()
 
         if col_bt.button("❌", key=f"del_{i}"):
             st.session_state.carrinho.pop(i)
             st.rerun()
 
+    total_apos_itens_preview = total_bruto_preview - total_desc_itens_preview
+    desconto_geral_preview, _ = calcular_desconto(
+        total_apos_itens_preview, st.session_state.desconto_geral
+    )
+    total_final_preview = total_apos_itens_preview - desconto_geral_preview
+
     st.divider()
+    st.subheader("Resumo")
+    st.write(f"**Subtotal:** {formatar_real(total_bruto_preview)}")
+    st.write(f"**Desconto por itens:** -{formatar_real(total_desc_itens_preview)}")
+    st.write(f"**Desconto geral:** -{formatar_real(desconto_geral_preview)}")
+    st.write(f"## Total final: {formatar_real(total_final_preview)}")
 
     if st.button("LIMPAR TUDO", type="secondary"):
         st.session_state.carrinho = []
+        st.session_state.desconto_geral = ""
         st.rerun()
 
     if st.button("GERAR IMAGEM FINAL", type="primary", use_container_width=True):
         if cliente.strip():
             with st.spinner("Gerando orçamento..."):
-                res = gerar_imagem(cliente, data_ent, st.session_state.carrinho)
+                res = gerar_imagem(
+                    cliente,
+                    data_ent,
+                    st.session_state.carrinho,
+                    st.session_state.desconto_geral
+                )
                 st.image(res)
 
                 col_b1, col_b2 = st.columns(2)
