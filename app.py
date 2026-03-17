@@ -43,11 +43,9 @@ def calcular_desconto(valor_base, desconto_str):
     if not texto:
         return 0.0, ""
 
-    # Remove espaços
     texto = texto.replace(" ", "")
 
     try:
-        # Desconto percentual
         if "%" in texto:
             numero = texto.replace("%", "").replace("-", "").replace(",", ".")
             percentual = float(numero)
@@ -55,7 +53,6 @@ def calcular_desconto(valor_base, desconto_str):
             desconto = min(desconto, valor_base)
             return desconto, f"{percentual:.0f}%"
 
-        # Desconto em reais
         texto_limpo = (
             texto.replace("r$", "")
             .replace("-", "")
@@ -220,56 +217,66 @@ def gerar_imagem(cliente, data_entrega, itens, desconto_geral_str=""):
     # --- TOTAIS ---
     draw.line((50, y_itens + 15, 650, y_itens + 15), fill=cor_fundo_logo, width=3)
 
+    y_resumo = y_itens + 35
+
     draw.text(
-        (50, y_itens + 35),
+        (50, y_resumo),
         f"TOTAL DE DOCES: {total_doces}",
         fill=cor_marrom_logo,
         font=carregar_fonte(18, True),
     )
 
+    y_resumo += 35
+
     draw.text(
-        (50, y_itens + 70),
+        (50, y_resumo),
         "Subtotal",
         fill=cor_marrom_logo,
         font=carregar_fonte(18, True),
     )
     draw.text(
-        (520, y_itens + 70),
+        (520, y_resumo),
         formatar_real(total_bruto),
         fill=cor_marrom_logo,
         font=carregar_fonte(18, True),
     )
 
-    draw.text(
-        (50, y_itens + 105),
-        "Desconto por itens",
-        fill=cor_desconto,
-        font=carregar_fonte(18, True),
-    )
-    draw.text(
-        (520, y_itens + 105),
-        f"-{formatar_real(total_desconto_itens)}",
-        fill=cor_desconto,
-        font=carregar_fonte(18, True),
-    )
+    if total_desconto_itens > 0:
+        y_resumo += 35
+        draw.text(
+            (50, y_resumo),
+            "Desconto por itens",
+            fill=cor_desconto,
+            font=carregar_fonte(18, True),
+        )
+        draw.text(
+            (520, y_resumo),
+            f"-{formatar_real(total_desconto_itens)}",
+            fill=cor_desconto,
+            font=carregar_fonte(18, True),
+        )
 
-    draw.text(
-        (50, y_itens + 140),
-        "Desconto geral",
-        fill=cor_desconto,
-        font=carregar_fonte(18, True),
-    )
-    draw.text(
-        (520, y_itens + 140),
-        f"-{formatar_real(desconto_geral_valor)}",
-        fill=cor_desconto,
-        font=carregar_fonte(18, True),
-    )
+    if desconto_geral_valor > 0:
+        y_resumo += 35
+        draw.text(
+            (50, y_resumo),
+            "Desconto geral",
+            fill=cor_desconto,
+            font=carregar_fonte(18, True),
+        )
+        draw.text(
+            (520, y_resumo),
+            f"-{formatar_real(desconto_geral_valor)}",
+            fill=cor_desconto,
+            font=carregar_fonte(18, True),
+        )
 
-    draw.line((50, y_itens + 180, 650, y_itens + 180), fill=cor_fundo_logo, width=2)
+    y_resumo += 40
+    draw.line((50, y_resumo, 650, y_resumo), fill=cor_fundo_logo, width=2)
 
+    y_resumo += 25
     draw.text(
-        (50, y_itens + 205),
+        (50, y_resumo),
         "TOTAL DO PEDIDO",
         fill=cor_marrom_logo,
         font=carregar_fonte(24, True),
@@ -282,7 +289,7 @@ def gerar_imagem(cliente, data_entrega, itens, desconto_geral_str=""):
     x_total = 650 - largura_total
 
     draw.text(
-        (x_total, y_itens + 205),
+        (x_total, y_resumo),
         texto_total,
         fill=cor_destaque,
         font=fonte_total
@@ -290,28 +297,28 @@ def gerar_imagem(cliente, data_entrega, itens, desconto_geral_str=""):
 
     # --- FORMAS DE PAGAMENTO ---
     draw.text(
-        (50, y_itens + 255),
+        (50, y_resumo + 50),
         "FORMAS DE PAGAMENTO",
         fill=cor_marrom_logo,
         font=carregar_fonte(16, True)
     )
 
     draw.text(
-        (50, y_itens + 280),
+        (50, y_resumo + 75),
         "Pix | Dinheiro | Cartão | Crypto",
         fill=cor_marrom_logo,
         font=carregar_fonte(16)
     )
 
     draw.text(
-        (50, y_itens + 305),
+        (50, y_resumo + 100),
         "Cartão em até 12x (juros da maquininha)",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
     )
 
     draw.text(
-        (50, y_itens + 330),
+        (50, y_resumo + 125),
         "Reserva mediante confirmação.",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
@@ -492,8 +499,13 @@ if st.session_state.carrinho:
     st.divider()
     st.subheader("Resumo")
     st.write(f"**Subtotal:** {formatar_real(total_bruto_preview)}")
-    st.write(f"**Desconto por itens:** -{formatar_real(total_desc_itens_preview)}")
-    st.write(f"**Desconto geral:** -{formatar_real(desconto_geral_preview)}")
+
+    if total_desc_itens_preview > 0:
+        st.write(f"**Desconto por itens:** -{formatar_real(total_desc_itens_preview)}")
+
+    if desconto_geral_preview > 0:
+        st.write(f"**Desconto geral:** -{formatar_real(desconto_geral_preview)}")
+
     st.write(f"## Total final: {formatar_real(total_final_preview)}")
 
     if st.button("LIMPAR TUDO", type="secondary"):
