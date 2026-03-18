@@ -77,8 +77,8 @@ def calcular_desconto(valor_base, desconto_str):
 
 
 CATALOGO = {
-    "Brigadeiro Chocolate": {"tipo": "unitario", "preco_cento": 125.00},
-    "Brigadeiro Ninho": {"tipo": "unitario", "preco_cento": 125.00},
+    "Brigadeiro de Chocolate": {"tipo": "unitario", "preco_cento": 125.00},
+    "Brigadeiro de Ninho": {"tipo": "unitario", "preco_cento": 125.00},
     "Beijinho": {"tipo": "unitario", "preco_cento": 125.00},
     "Meio a Meio": {"tipo": "unitario", "preco_cento": 125.00},
     "Bicho de Pé": {"tipo": "unitario", "preco_cento": 125.00},
@@ -97,7 +97,7 @@ CATALOGO = {
     "Red Velvet": {"tipo": "unitario", "preco_cento": 185.00},
     "Ninho Temático": {"tipo": "unitario", "preco_cento": 160.00},
     "Aplique": {"tipo": "unitario", "preco_cento": 150.00},
-    "Brigadeiro Tradicional KG": {"tipo": "kg", "preco_kg": 85.00},
+    "Brigadeiro de Chocolate em massa": {"tipo": "kg", "preco_kg": 85.00},
 }
 
 
@@ -262,7 +262,7 @@ def gerar_imagem(cliente, data_entrega, itens, desconto_geral_str=""):
     if total_gramas > 0:
         draw.text(
             (50, y_resumo),
-            f"TOTAL MASSA/KG: {formatar_peso(total_gramas)}",
+            f"PESO TOTAL/KG: {formatar_peso(total_gramas)}",
             fill=cor_marrom_logo,
             font=carregar_fonte(18, True),
         )
@@ -347,7 +347,7 @@ def gerar_imagem(cliente, data_entrega, itens, desconto_geral_str=""):
 
     draw.text(
         (50, y_resumo + 75),
-        "Pix | Dinheiro | Cartão | Crypto",
+        "Pix | Dinheiro | Cartão | Criptomoedas",
         fill=cor_marrom_logo,
         font=carregar_fonte(16)
     )
