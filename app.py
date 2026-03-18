@@ -5,7 +5,6 @@ import io
 import pytz
 from pathlib import Path
 import base64
-import re
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -21,6 +20,15 @@ def carregar_fonte(tamanho, negrito=False):
 
 def formatar_real(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def formatar_peso(gramas):
+    if gramas >= 1000:
+        kg = gramas / 1000
+        if kg.is_integer():
+            return f"{int(kg)}kg"
+        return f"{kg:.3f}kg".replace(".", ",").rstrip("0").rstrip(",")
+    return f"{int(gramas)}g"
 
 
 def calcular_desconto(valor_base, desconto_str):
@@ -69,27 +77,49 @@ def calcular_desconto(valor_base, desconto_str):
 
 
 CATALOGO = {
-    "Brigadeiro Chocolate": 125.00,
-    "Brigadeiro Ninho": 125.00,
-    "Beijinho": 125.00,
-    "Meio a Meio": 125.00,
-    "Bicho de Pé": 125.00,
-    "Moranguinho": 125.00,
-    "Cajuzinho": 130.00,
-    "Ninho com Nutella": 150.00,
-    "Churros": 150.00,
-    "Ferrero Rocher": 150.00,
-    "Maracujá": 150.00,
-    "Limão": 150.00,
-    "Maçãzinha": 150.00,
-    "Olho de Sogra": 150.00,
-    "Oreo": 150.00,
-    "Meio Amargo": 160.00,
-    "Romeu e Julieta": 185.00,
-    "Red Velvet": 185.00,
-    "Ninho Temático": 160.00,
-    "Aplique": 150.00,
+    "Brigadeiro Chocolate": {"tipo": "unitario", "preco_cento": 125.00},
+    "Brigadeiro Ninho": {"tipo": "unitario", "preco_cento": 125.00},
+    "Beijinho": {"tipo": "unitario", "preco_cento": 125.00},
+    "Meio a Meio": {"tipo": "unitario", "preco_cento": 125.00},
+    "Bicho de Pé": {"tipo": "unitario", "preco_cento": 125.00},
+    "Moranguinho": {"tipo": "unitario", "preco_cento": 125.00},
+    "Cajuzinho": {"tipo": "unitario", "preco_cento": 130.00},
+    "Ninho com Nutella": {"tipo": "unitario", "preco_cento": 150.00},
+    "Churros": {"tipo": "unitario", "preco_cento": 150.00},
+    "Ferrero Rocher": {"tipo": "unitario", "preco_cento": 150.00},
+    "Maracujá": {"tipo": "unitario", "preco_cento": 150.00},
+    "Limão": {"tipo": "unitario", "preco_cento": 150.00},
+    "Maçãzinha": {"tipo": "unitario", "preco_cento": 150.00},
+    "Olho de Sogra": {"tipo": "unitario", "preco_cento": 150.00},
+    "Oreo": {"tipo": "unitario", "preco_cento": 150.00},
+    "Meio Amargo": {"tipo": "unitario", "preco_cento": 160.00},
+    "Romeu e Julieta": {"tipo": "unitario", "preco_cento": 185.00},
+    "Red Velvet": {"tipo": "unitario", "preco_cento": 185.00},
+    "Ninho Temático": {"tipo": "unitario", "preco_cento": 160.00},
+    "Aplique": {"tipo": "unitario", "preco_cento": 150.00},
+    "Brigadeiro Tradicional KG": {"tipo": "kg", "preco_kg": 85.00},
 }
+
+
+def calcular_subtotal_item(item):
+    if item["tipo"] == "unitario":
+        subtotal_bruto = (item["preco_cento"] / 100) * item["qtd"]
+    else:
+        subtotal_bruto = (item["preco_kg"] / 1000) * item["gramas"]
+
+    desconto_item_valor, desconto_item_desc = calcular_desconto(
+        subtotal_bruto, item.get("desconto", "")
+    )
+    subtotal_final = subtotal_bruto - desconto_item_valor
+
+    return subtotal_bruto, desconto_item_valor, desconto_item_desc, subtotal_final
+
+
+def gerar_texto_item(item):
+    if item["tipo"] == "unitario":
+        return f"{item['qtd']}un - {item['produto']}"
+    else:
+        return f"{formatar_peso(item['gramas'])} - {item['produto']}"
 
 
 def gerar_imagem(cliente, data_entrega, itens, desconto_geral_str=""):
@@ -120,7 +150,7 @@ def gerar_imagem(cliente, data_entrega, itens, desconto_geral_str=""):
     y_itens_inicio = y_pos + 140
     y_itens_fim = y_itens_inicio + (num_itens * espaco_linha)
 
-    y_fim_conteudo = y_itens_fim + 300
+    y_fim_conteudo = y_itens_fim + 320
     y_topo_rodape = max(y_fim_conteudo + 80, 900)
     H = y_topo_rodape + altura_rodape + margem_inferior
 
@@ -171,20 +201,21 @@ def gerar_imagem(cliente, data_entrega, itens, desconto_geral_str=""):
     total_bruto = 0
     total_desconto_itens = 0
     total_doces = 0
+    total_gramas = 0
     fonte_item = carregar_fonte(tam_fonte_item)
 
     for item in itens:
-        subtotal_bruto = (item["preco_cento"] / 100) * item["qtd"]
-        desconto_item_valor, desconto_item_desc = calcular_desconto(
-            subtotal_bruto, item.get("desconto", "")
-        )
-        subtotal_final = subtotal_bruto - desconto_item_valor
+        subtotal_bruto, desconto_item_valor, desconto_item_desc, subtotal_final = calcular_subtotal_item(item)
 
         total_bruto += subtotal_bruto
         total_desconto_itens += desconto_item_valor
-        total_doces += item["qtd"]
 
-        texto_item = f"{item['qtd']}un - {item['produto']}"
+        if item["tipo"] == "unitario":
+            total_doces += item["qtd"]
+        else:
+            total_gramas += item["gramas"]
+
+        texto_item = gerar_texto_item(item)
         if desconto_item_desc:
             texto_item += f" (-{desconto_item_desc})"
 
@@ -219,14 +250,25 @@ def gerar_imagem(cliente, data_entrega, itens, desconto_geral_str=""):
 
     y_resumo = y_itens + 35
 
-    draw.text(
-        (50, y_resumo),
-        f"TOTAL DE DOCES: {total_doces}",
-        fill=cor_marrom_logo,
-        font=carregar_fonte(18, True),
-    )
+    if total_doces > 0:
+        draw.text(
+            (50, y_resumo),
+            f"TOTAL DE DOCES: {total_doces}",
+            fill=cor_marrom_logo,
+            font=carregar_fonte(18, True),
+        )
+        y_resumo += 30
 
-    y_resumo += 35
+    if total_gramas > 0:
+        draw.text(
+            (50, y_resumo),
+            f"TOTAL MASSA/KG: {formatar_peso(total_gramas)}",
+            fill=cor_marrom_logo,
+            font=carregar_fonte(18, True),
+        )
+        y_resumo += 35
+    else:
+        y_resumo += 5
 
     draw.text(
         (50, y_resumo),
@@ -400,25 +442,61 @@ with col_c2:
 
 st.divider()
 
-c1, c2, c3, c4 = st.columns([3, 1, 1.3, 1])
-with c1:
-    p = st.selectbox("Produto", list(CATALOGO.keys()))
-with c2:
-    q = st.number_input("Qtd", min_value=1, value=50)
-with c3:
-    desconto_novo_item = st.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2")
-with c4:
-    st.write(" ")
-    if st.button("➕ Adicionar"):
-        st.session_state.carrinho.append(
-            {
-                "produto": p,
-                "qtd": int(q),
-                "preco_cento": CATALOGO[p],
-                "desconto": desconto_novo_item.strip(),
-            }
-        )
-        st.rerun()
+produto_selecionado = st.selectbox("Produto", list(CATALOGO.keys()))
+dados_produto = CATALOGO[produto_selecionado]
+
+if dados_produto["tipo"] == "unitario":
+    c1, c2, c3, c4 = st.columns([3, 1, 1.3, 1])
+
+    with c1:
+        st.text_input("Tipo de cobrança", value="Por unidade", disabled=True, key="tipo_unitario")
+    with c2:
+        qtd_unit = st.number_input("Qtd", min_value=1, value=50, step=1)
+    with c3:
+        desconto_novo_item = st.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2")
+    with c4:
+        st.write(" ")
+        if st.button("➕ Adicionar"):
+            st.session_state.carrinho.append(
+                {
+                    "produto": produto_selecionado,
+                    "tipo": "unitario",
+                    "qtd": int(qtd_unit),
+                    "preco_cento": dados_produto["preco_cento"],
+                    "desconto": desconto_novo_item.strip(),
+                }
+            )
+            st.rerun()
+
+else:
+    c1, c2, c3, c4, c5 = st.columns([2.2, 1.2, 1.2, 1.3, 1])
+
+    with c1:
+        st.text_input("Tipo de cobrança", value=f"Por peso ({formatar_real(dados_produto['preco_kg'])}/kg)", disabled=True, key="tipo_kg")
+    with c2:
+        unidade_peso = st.selectbox("Unidade", ["kg", "g"])
+    with c3:
+        if unidade_peso == "kg":
+            valor_peso = st.number_input("Quantidade", min_value=0.1, value=1.0, step=0.1, format="%.3f")
+            gramas_item = int(round(valor_peso * 1000))
+        else:
+            valor_peso = st.number_input("Quantidade", min_value=100, value=1000, step=50)
+            gramas_item = int(valor_peso)
+    with c4:
+        desconto_novo_item = st.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2", key="desc_kg_novo")
+    with c5:
+        st.write(" ")
+        if st.button("➕ Adicionar"):
+            st.session_state.carrinho.append(
+                {
+                    "produto": produto_selecionado,
+                    "tipo": "kg",
+                    "gramas": int(gramas_item),
+                    "preco_kg": dados_produto["preco_kg"],
+                    "desconto": desconto_novo_item.strip(),
+                }
+            )
+            st.rerun()
 
 st.divider()
 
@@ -433,62 +511,125 @@ st.session_state.desconto_geral = desconto_geral
 if st.session_state.carrinho:
     st.subheader("🛒 Itens Selecionados")
 
-    h_col1, h_col2, h_col3, h_col4 = st.columns([3, 1, 1.4, 0.5])
-    h_col1.caption("Produto")
-    h_col2.caption("Qtd")
-    h_col3.caption("Desconto")
-    h_col4.write("")
-
     total_bruto_preview = 0
     total_desc_itens_preview = 0
+    total_doces_preview = 0
+    total_gramas_preview = 0
 
     for i, item in enumerate(st.session_state.carrinho):
-        col_prod, col_qtd, col_desc, col_bt = st.columns([3, 1, 1.4, 0.5])
-
-        subtotal_bruto = (item["preco_cento"] / 100) * item["qtd"]
-        desconto_item_valor, _ = calcular_desconto(subtotal_bruto, item.get("desconto", ""))
-        subtotal_final = subtotal_bruto - desconto_item_valor
+        subtotal_bruto, desconto_item_valor, _, subtotal_final = calcular_subtotal_item(item)
 
         total_bruto_preview += subtotal_bruto
         total_desc_itens_preview += desconto_item_valor
 
-        col_prod.write(
-            f"**{item['produto']}**  \n"
-            f"{formatar_real(subtotal_bruto)} → **{formatar_real(subtotal_final)}**"
-        )
+        if item["tipo"] == "unitario":
+            total_doces_preview += item["qtd"]
 
-        nova_qtd = col_qtd.number_input(
-            "Qtd",
-            min_value=1,
-            value=int(item["qtd"]),
-            key=f"edit_{i}",
-            label_visibility="collapsed",
-        )
+            col_prod, col_qtd, col_desc, col_bt = st.columns([3, 1, 1.4, 0.5])
 
-        novo_desc = col_desc.text_input(
-            "Desconto",
-            value=item.get("desconto", ""),
-            key=f"desc_{i}",
-            placeholder="10% ou R$2",
-            label_visibility="collapsed",
-        )
+            col_prod.write(
+                f"**{item['produto']}**  \n"
+                f"{item['qtd']}un | {formatar_real(subtotal_bruto)} → **{formatar_real(subtotal_final)}**"
+            )
 
-        alterou = False
+            nova_qtd = col_qtd.number_input(
+                "Qtd",
+                min_value=1,
+                value=int(item["qtd"]),
+                key=f"edit_qtd_{i}",
+                label_visibility="collapsed",
+            )
 
-        if nova_qtd != item["qtd"]:
-            st.session_state.carrinho[i]["qtd"] = int(nova_qtd)
-            alterou = True
+            novo_desc = col_desc.text_input(
+                "Desconto",
+                value=item.get("desconto", ""),
+                key=f"desc_{i}",
+                placeholder="10% ou R$2",
+                label_visibility="collapsed",
+            )
 
-        if novo_desc != item.get("desconto", ""):
-            st.session_state.carrinho[i]["desconto"] = novo_desc.strip()
-            alterou = True
+            alterou = False
 
-        if alterou:
-            st.rerun()
+            if nova_qtd != item["qtd"]:
+                st.session_state.carrinho[i]["qtd"] = int(nova_qtd)
+                alterou = True
 
-        if col_bt.button("❌", key=f"del_{i}"):
-            st.session_state.carrinho.pop(i)
-            st.rerun()
+            if novo_desc != item.get("desconto", ""):
+                st.session_state.carrinho[i]["desconto"] = novo_desc.strip()
+                alterou = True
+
+            if alterou:
+                st.rerun()
+
+            if col_bt.button("❌", key=f"del_{i}"):
+                st.session_state.carrinho.pop(i)
+                st.rerun()
+
+        else:
+            total_gramas_preview += item["gramas"]
+
+            col_prod, col_unid, col_qtd, col_desc, col_bt = st.columns([2.4, 1, 1.2, 1.4, 0.5])
+
+            col_prod.write(
+                f"**{item['produto']}**  \n"
+                f"{formatar_peso(item['gramas'])} | {formatar_real(subtotal_bruto)} → **{formatar_real(subtotal_final)}**"
+            )
+
+            unidade_edit = col_unid.selectbox(
+                "Unidade",
+                ["kg", "g"],
+                index=0 if item["gramas"] % 1000 == 0 else 1,
+                key=f"unidade_edit_{i}",
+                label_visibility="collapsed",
+            )
+
+            if unidade_edit == "kg":
+                valor_padrao = item["gramas"] / 1000
+                novo_valor_peso = col_qtd.number_input(
+                    "Quantidade",
+                    min_value=0.1,
+                    value=float(valor_padrao),
+                    step=0.1,
+                    format="%.3f",
+                    key=f"peso_kg_{i}",
+                    label_visibility="collapsed",
+                )
+                novas_gramas = int(round(novo_valor_peso * 1000))
+            else:
+                novo_valor_peso = col_qtd.number_input(
+                    "Quantidade",
+                    min_value=100,
+                    value=int(item["gramas"]),
+                    step=50,
+                    key=f"peso_g_{i}",
+                    label_visibility="collapsed",
+                )
+                novas_gramas = int(novo_valor_peso)
+
+            novo_desc = col_desc.text_input(
+                "Desconto",
+                value=item.get("desconto", ""),
+                key=f"desc_{i}",
+                placeholder="10% ou R$2",
+                label_visibility="collapsed",
+            )
+
+            alterou = False
+
+            if novas_gramas != item["gramas"]:
+                st.session_state.carrinho[i]["gramas"] = int(novas_gramas)
+                alterou = True
+
+            if novo_desc != item.get("desconto", ""):
+                st.session_state.carrinho[i]["desconto"] = novo_desc.strip()
+                alterou = True
+
+            if alterou:
+                st.rerun()
+
+            if col_bt.button("❌", key=f"del_{i}"):
+                st.session_state.carrinho.pop(i)
+                st.rerun()
 
     total_apos_itens_preview = total_bruto_preview - total_desc_itens_preview
     desconto_geral_preview, _ = calcular_desconto(
@@ -498,6 +639,13 @@ if st.session_state.carrinho:
 
     st.divider()
     st.subheader("Resumo")
+
+    if total_doces_preview > 0:
+        st.write(f"**Total de doces unitários:** {total_doces_preview}")
+
+    if total_gramas_preview > 0:
+        st.write(f"**Total de massa/KG:** {formatar_peso(total_gramas_preview)}")
+
     st.write(f"**Subtotal:** {formatar_real(total_bruto_preview)}")
 
     if total_desc_itens_preview > 0:
