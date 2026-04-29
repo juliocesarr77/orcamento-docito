@@ -31,6 +31,49 @@ def formatar_peso(gramas):
     return f"{int(gramas)}g"
 
 
+def largura_texto(draw, texto, fonte):
+    bbox = draw.textbbox((0, 0), texto, font=fonte)
+    return bbox[2] - bbox[0]
+
+
+def altura_linha_fonte(draw, fonte):
+    bbox = draw.textbbox((0, 0), "Ag", font=fonte)
+    return (bbox[3] - bbox[1]) + 7
+
+
+def quebrar_texto_largura(draw, texto, fonte, largura_max):
+    texto = str(texto).strip()
+
+    if not texto:
+        return [""]
+
+    linhas_finais = []
+
+    for bloco in texto.splitlines():
+        palavras = bloco.split()
+
+        if not palavras:
+            linhas_finais.append("")
+            continue
+
+        linha_atual = ""
+
+        for palavra in palavras:
+            teste = palavra if not linha_atual else f"{linha_atual} {palavra}"
+
+            if largura_texto(draw, teste, fonte) <= largura_max:
+                linha_atual = teste
+            else:
+                if linha_atual:
+                    linhas_finais.append(linha_atual)
+                linha_atual = palavra
+
+        if linha_atual:
+            linhas_finais.append(linha_atual)
+
+    return linhas_finais or [""]
+
+
 def calcular_desconto(valor_base, desconto_str):
     if not desconto_str:
         return 0.0, ""
@@ -87,7 +130,10 @@ CATALOGO = {
     "Aplique": {"tipo": "unitario", "preco_cento": 150.00},
     "Brigadeiro de Chocolate em massa": {"tipo": "kg", "preco_kg": 84.90},
     "Brigadeiro de Chocolate Branco": {"tipo": "unitario", "preco_cento": 150.00},
-    "Brigadeiro de Ninho com Rosetas Coloridas e Apliques de Pasta Americana": {"tipo": "unitario", "preco_cento": 160.00},
+    "Brigadeiro de Ninho com Rosetas Coloridas e Apliques de Pasta Americana": {
+        "tipo": "unitario",
+        "preco_cento": 160.00,
+    },
 }
 
 
@@ -147,6 +193,7 @@ def gerar_imagem(
     adicionais = adicionais or []
 
     W = 700
+
     total_linhas = len(itens) + len(embalagens_especiais) + len(adicionais)
     if embalagem_pedido.get("descricao", "").strip() and embalagem_pedido.get("valor", 0) > 0:
         total_linhas += 1
@@ -172,14 +219,74 @@ def gerar_imagem(
     cor_cinza = (140, 140, 140)
     cor_secao = (120, 70, 50)
 
+    x_desc = 50
+    x_preco_direita = 650
+    x_preco_min = 535
+    largura_desc = x_preco_min - x_desc - 12
+
+    fonte_item_previa = carregar_fonte(tam_fonte_item)
+
+    img_medida = Image.new("RGB", (W, 100), color=(255, 255, 255))
+    draw_medida = ImageDraw.Draw(img_medida)
+
+    def altura_bloco_orcamento(texto, tem_detalhe=False, fonte=None, largura=None):
+        fonte = fonte or fonte_item_previa
+        largura = largura or largura_desc
+
+        linhas = quebrar_texto_largura(draw_medida, texto, fonte, largura)
+        altura_linha = altura_linha_fonte(draw_medida, fonte)
+
+        extra = 24 if tem_detalhe else 0
+
+        return max(
+            espaco_linha,
+            len(linhas) * altura_linha + extra + 8
+        )
+
+    total_altura_itens = 0
+
+    for item in itens:
+        subtotal_bruto, desconto_item_valor, desconto_item_desc, subtotal_final = calcular_subtotal_item(item)
+
+        texto_prev = gerar_texto_item(item)
+
+        if desconto_item_desc:
+            texto_prev += f" (-{desconto_item_desc})"
+
+        total_altura_itens += altura_bloco_orcamento(
+            texto_prev,
+            tem_detalhe=bool(desconto_item_desc)
+        )
+
+    if embalagem_pedido.get("descricao", "").strip() and embalagem_pedido.get("valor", 0) > 0:
+        texto_prev = f"Embalagem do pedido - {embalagem_pedido['descricao']}"
+        total_altura_itens += altura_bloco_orcamento(
+            texto_prev,
+            fonte=carregar_fonte(tam_fonte_item, True)
+        )
+
+    for emb in embalagens_especiais:
+        texto_prev = f"Embalagem especial - {emb['qtd']}x {emb['descricao']}"
+        total_altura_itens += altura_bloco_orcamento(texto_prev)
+
+    for ad in adicionais:
+        texto_prev = f"Adicional - {ad['descricao']}"
+        total_altura_itens += altura_bloco_orcamento(texto_prev)
+
     altura_obs = 0
     if observacao.strip():
-        linhas_obs = 2 if len(observacao.strip()) > 75 else 1
-        altura_obs = 40 + (linhas_obs * 22)
+        fonte_obs_previa = carregar_fonte(14)
+        linhas_obs_previas = quebrar_texto_largura(
+            draw_medida,
+            observacao.strip(),
+            fonte_obs_previa,
+            600
+        )
+        altura_obs = 40 + (len(linhas_obs_previas) * 22)
 
     y_pos = altura_cabecalho + 30
     y_itens_inicio = y_pos + 140
-    y_itens_fim = y_itens_inicio + (total_linhas * espaco_linha)
+    y_itens_fim = y_itens_inicio + total_altura_itens
 
     y_fim_conteudo = y_itens_fim + 370 + altura_obs
     y_topo_rodape = max(y_fim_conteudo + 80, 980)
@@ -235,6 +342,53 @@ def gerar_imagem(
     total_gramas = 0
     fonte_item = carregar_fonte(tam_fonte_item)
 
+    def desenhar_linha_com_preco(
+        y,
+        texto,
+        texto_valor,
+        cor_texto,
+        fonte_texto,
+        cor_valor=None,
+        fonte_valor=None,
+        detalhe_desc=None
+    ):
+        cor_valor = cor_valor or cor_texto
+        fonte_valor = fonte_valor or fonte_texto
+
+        linhas = quebrar_texto_largura(draw, texto, fonte_texto, largura_desc)
+        altura_linha = altura_linha_fonte(draw, fonte_texto)
+
+        for i, linha in enumerate(linhas):
+            draw.text(
+                (x_desc, y + (i * altura_linha)),
+                linha,
+                fill=cor_texto,
+                font=fonte_texto
+            )
+
+        bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_valor)
+        largura_valor = bbox_valor[2] - bbox_valor[0]
+
+        draw.text(
+            (x_preco_direita - largura_valor, y),
+            texto_valor,
+            fill=cor_valor,
+            font=fonte_valor
+        )
+
+        altura_usada = len(linhas) * altura_linha
+
+        if detalhe_desc:
+            draw.text(
+                (x_desc + 15, y + altura_usada),
+                detalhe_desc,
+                fill=cor_cinza,
+                font=carregar_fonte(max(tam_fonte_item - 4, 11))
+            )
+            altura_usada += 24
+
+        return y + max(espaco_linha, altura_usada + 8)
+
     for item in itens:
         subtotal_bruto, desconto_item_valor, desconto_item_desc, subtotal_final = calcular_subtotal_item(item)
 
@@ -252,38 +406,35 @@ def gerar_imagem(
 
         texto_valor = formatar_real(subtotal_final)
 
-        draw.text((50, y_itens), texto_item, fill=cor_marrom_logo, font=fonte_item)
-
-        bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_item)
-        largura_valor = bbox_valor[2] - bbox_valor[0]
-        x_valor = 650 - largura_valor
-        draw.text((x_valor, y_itens), texto_valor, fill=cor_marrom_logo, font=fonte_item)
+        detalhe_desc = None
 
         if desconto_item_valor > 0:
-            detalhe_desc = f"Original: {formatar_real(subtotal_bruto)} | Desconto: -{formatar_real(desconto_item_valor)}"
-            draw.text(
-                (65, y_itens + 20),
-                detalhe_desc,
-                fill=cor_cinza,
-                font=carregar_fonte(max(tam_fonte_item - 4, 11))
+            detalhe_desc = (
+                f"Original: {formatar_real(subtotal_bruto)} | "
+                f"Desconto: -{formatar_real(desconto_item_valor)}"
             )
 
-        y_itens += espaco_linha
+        y_itens = desenhar_linha_com_preco(
+            y=y_itens,
+            texto=texto_item,
+            texto_valor=texto_valor,
+            cor_texto=cor_marrom_logo,
+            fonte_texto=fonte_item,
+            detalhe_desc=detalhe_desc
+        )
 
     # EMBALAGEM DO PEDIDO
     total_emb_pedido = calcular_total_embalagens_pedido(embalagem_pedido)
     if total_emb_pedido > 0:
-        draw.text(
-            (50, y_itens),
-            f"Embalagem do pedido - {embalagem_pedido['descricao']}",
-            fill=cor_secao,
-            font=carregar_fonte(tam_fonte_item, True)
+        y_itens = desenhar_linha_com_preco(
+            y=y_itens,
+            texto=f"Embalagem do pedido - {embalagem_pedido['descricao']}",
+            texto_valor=formatar_real(total_emb_pedido),
+            cor_texto=cor_secao,
+            fonte_texto=carregar_fonte(tam_fonte_item, True),
+            cor_valor=cor_secao,
+            fonte_valor=fonte_item
         )
-        texto_valor = formatar_real(total_emb_pedido)
-        bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_item)
-        largura_valor = bbox_valor[2] - bbox_valor[0]
-        draw.text((650 - largura_valor, y_itens), texto_valor, fill=cor_secao, font=fonte_item)
-        y_itens += espaco_linha
 
     # EMBALAGENS ESPECIAIS
     for emb in embalagens_especiais:
@@ -291,24 +442,26 @@ def gerar_imagem(
         texto = f"Embalagem especial - {emb['qtd']}x {emb['descricao']}"
         texto_valor = formatar_real(total_emb_item)
 
-        draw.text((50, y_itens), texto, fill=cor_secao, font=fonte_item)
-        bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_item)
-        largura_valor = bbox_valor[2] - bbox_valor[0]
-        draw.text((650 - largura_valor, y_itens), texto_valor, fill=cor_secao, font=fonte_item)
-
-        y_itens += espaco_linha
+        y_itens = desenhar_linha_com_preco(
+            y=y_itens,
+            texto=texto,
+            texto_valor=texto_valor,
+            cor_texto=cor_secao,
+            fonte_texto=fonte_item
+        )
 
     # ADICIONAIS
     for ad in adicionais:
         texto = f"Adicional - {ad['descricao']}"
         texto_valor = formatar_real(float(ad["valor"]))
 
-        draw.text((50, y_itens), texto, fill=cor_secao, font=fonte_item)
-        bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_item)
-        largura_valor = bbox_valor[2] - bbox_valor[0]
-        draw.text((650 - largura_valor, y_itens), texto_valor, fill=cor_secao, font=fonte_item)
-
-        y_itens += espaco_linha
+        y_itens = desenhar_linha_com_preco(
+            y=y_itens,
+            texto=texto,
+            texto_valor=texto_valor,
+            cor_texto=cor_secao,
+            fonte_texto=fonte_item
+        )
 
     total_emb_especiais = calcular_total_embalagens_especiais(embalagens_especiais)
     total_adicionais = calcular_total_adicionais(adicionais)
@@ -411,12 +564,23 @@ def gerar_imagem(
             font=carregar_fonte(16, True),
         )
         y_resumo += 25
-        draw.text(
-            (50, y_resumo),
+
+        fonte_obs = carregar_fonte(14)
+        linhas_obs = quebrar_texto_largura(
+            draw,
             observacao.strip(),
-            fill=cor_marrom_logo,
-            font=carregar_fonte(14),
+            fonte_obs,
+            600
         )
+
+        for linha in linhas_obs:
+            draw.text(
+                (50, y_resumo),
+                linha,
+                fill=cor_marrom_logo,
+                font=fonte_obs,
+            )
+            y_resumo += 22
 
     y_resumo += 50
     draw.line((50, y_resumo, 650, y_resumo), fill=cor_fundo_logo, width=2)
@@ -601,10 +765,23 @@ else:
         unidade_peso = st.selectbox("Unidade", ["kg", "g"], key="unidade_nova")
     with c3:
         if unidade_peso == "kg":
-            valor_peso = st.number_input("Quantidade", min_value=0.1, value=1.0, step=0.1, format="%.3f", key="peso_novo_kg")
+            valor_peso = st.number_input(
+                "Quantidade",
+                min_value=0.1,
+                value=1.0,
+                step=0.1,
+                format="%.3f",
+                key="peso_novo_kg"
+            )
             gramas_item = int(round(valor_peso * 1000))
         else:
-            valor_peso = st.number_input("Quantidade", min_value=100, value=1000, step=50, key="peso_novo_g")
+            valor_peso = st.number_input(
+                "Quantidade",
+                min_value=100,
+                value=1000,
+                step=50,
+                key="peso_novo_g"
+            )
             gramas_item = int(valor_peso)
     with c4:
         desconto_novo_item = st.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2", key="desc_kg_novo")
@@ -735,7 +912,10 @@ st.session_state.desconto_geral = desconto_geral
 # RESUMO
 tem_conteudo = (
     st.session_state.carrinho
-    or (st.session_state.embalagem_pedido.get("descricao", "").strip() and st.session_state.embalagem_pedido.get("valor", 0) > 0)
+    or (
+        st.session_state.embalagem_pedido.get("descricao", "").strip()
+        and st.session_state.embalagem_pedido.get("valor", 0) > 0
+    )
     or st.session_state.embalagens_especiais
     or st.session_state.adicionais
 )
