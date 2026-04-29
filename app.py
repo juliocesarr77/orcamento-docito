@@ -623,14 +623,14 @@ def gerar_imagem(
 
     draw.text(
         (50, y_resumo + 100),
-        "Cartão em até 12x (juros da maquininha)",
+        "Cartão em até 12x com acréscimo da maquininha.",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
     )
 
     draw.text(
         (50, y_resumo + 125),
-        "Reserva mediante confirmação.",
+        "Data reservada mediante confirmação do pedido.",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
     )
@@ -654,7 +654,7 @@ def gerar_imagem(
     draw.rectangle([0, y_topo_rodape, W, H], fill=cor_fundo_logo)
 
     avisos = [
-        "• Forminhas 4 pétalas (branca) inclusas.",
+        "• Forminhas 4 pétalas (brancas) inclusas.",
         "• Forminhas decorativas fornecidas pelo cliente",
         "  terão custo adicional por caixa extra utilizada.",
     ]
