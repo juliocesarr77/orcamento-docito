@@ -86,6 +86,8 @@ CATALOGO = {
     "Ninho Temático": {"tipo": "unitario", "preco_cento": 160.00},
     "Aplique": {"tipo": "unitario", "preco_cento": 150.00},
     "Brigadeiro de Chocolate em massa": {"tipo": "kg", "preco_kg": 84.90},
+    "Brigadeiro de Chocolate Branco": {"tipo": "unitario", "preco_cento": 150.00},
+    "Brigadeiro de Ninho com Rosetas Coloridas e Apliques de Pasta Americana": {"tipo": "unitario", "preco_cento": 160.00},
 }
 
 
