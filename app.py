@@ -110,6 +110,14 @@ def carregar_historico_supabase():
 
 def salvar_orcamento_supabase(novo_registro):
     try:
+        # Corrige o erro de enviar texto vazio "" para as colunas numéricas do Supabase
+        if novo_registro.get("desconto_geral") == "":
+            novo_registro["desconto_geral"] = 0.0
+            
+        if novo_registro.get("total") == "":
+            novo_registro["total"] = 0.0
+
+        # Agora o insert vai rodar sem travar nos números
         supabase.table("orcamentos").insert(novo_registro).execute()
         return True
     except Exception as e:
