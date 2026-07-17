@@ -5,7 +5,8 @@ import io
 import pytz
 from pathlib import Path
 import base64
-from supabase import create_client, Client # Importando o Supabase
+import json
+from supabase import create_client, Client
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -16,7 +17,12 @@ try:
     supabase_key = st.secrets["SUPABASE_KEY"]
     supabase: Client = create_client(supabase_url, supabase_key)
 except Exception as e:
-    st.error("Erro ao conectar com as chaves do Supabase. Verifique os Secrets do Streamlit.")
+    st.error(
+        "Erro ao conectar ao Supabase. Confira SUPABASE_URL e SUPABASE_KEY "
+        "nos Secrets do Streamlit."
+    )
+    st.exception(e)
+    st.stop()
 
 def carregar_fonte(tamanho, negrito=False):
     try:
@@ -97,35 +103,141 @@ def calcular_desconto(valor_base, desconto_str):
         return 0.0, ""
 
 
-# --- FUNÇÕES DE HISTÓRICO ADAPTADAS PARA SUPABASE ---
+# --- FUNÇÕES DE HISTÓRICO E PERSISTÊNCIA NO SUPABASE ---
+def normalizar_orcamento(registro):
+    """
+    Padroniza registros antigos e novos.
+
+    A tabela possui colunas separadas e também a coluna obrigatória `dados`.
+    Esta função usa primeiro as colunas separadas e, se necessário, recupera
+    valores de `dados`.
+    """
+    registro = dict(registro or {})
+    dados = registro.get("dados")
+    if not isinstance(dados, dict):
+        dados = {}
+
+    registro["itens"] = registro.get("itens") or dados.get("itens") or []
+    registro["embalagem_pedido"] = (
+        registro.get("embalagem_pedido")
+        or dados.get("embalagem_pedido")
+        or {"descricao": "", "valor": 0.0}
+    )
+    registro["embalagens_especiais"] = (
+        registro.get("embalagens_especiais")
+        or dados.get("embalagens_especiais")
+        or []
+    )
+    registro["adicionais"] = (
+        registro.get("adicionais")
+        or dados.get("adicionais")
+        or []
+    )
+    registro["observacao"] = (
+        registro.get("observacao")
+        if registro.get("observacao") is not None
+        else dados.get("observacao", "")
+    )
+    registro["desconto_generico"] = (
+        registro.get("desconto_generico")
+        if registro.get("desconto_generico") is not None
+        else dados.get("desconto_geral", "")
+    )
+
+    try:
+        registro["numero"] = int(registro.get("numero", 0))
+    except (TypeError, ValueError):
+        registro["numero"] = 0
+
+    try:
+        registro["total"] = float(registro.get("total", 0.0))
+    except (TypeError, ValueError):
+        registro["total"] = 0.0
+
+    return registro
+
+
 def carregar_historico_supabase():
     try:
-        # Busca todos os orçamentos ordenados pelo número
-        response = supabase.table("orcamentos").select("*").order("numero", desc=True).execute()
-        return response.data if response.data else []
+        response = (
+            supabase.table("orcamentos")
+            .select("*")
+            .order("numero", desc=True)
+            .execute()
+        )
+        return [normalizar_orcamento(item) for item in (response.data or [])]
     except Exception as e:
         st.error(f"Erro ao buscar dados do Supabase: {e}")
         return []
 
 
-import json # Garanta que esse import esteja no topo do seu arquivo
+def obter_proximo_numero():
+    """
+    Obtém o maior número salvo e soma 1.
+
+    Para uso com vários usuários ao mesmo tempo, o ideal é criar uma sequence
+    no PostgreSQL. Para este aplicativo, esta versão mantém a lógica atual.
+    """
+    try:
+        response = (
+            supabase.table("orcamentos")
+            .select("numero")
+            .order("numero", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return int(response.data[0]["numero"]) + 1
+        return 1
+    except Exception as e:
+        raise RuntimeError(f"Não foi possível obter o próximo número: {e}") from e
+
 
 def salvar_orcamento_supabase(novo_registro):
     try:
-        # Se o desconto for um dicionário, transforma em texto JSON
-        desconto = novo_registro.get("desconto_geral")
-        if isinstance(desconto, dict):
-            novo_registro["desconto_geral"] = json.dumps(desconto)
-        
-        # Garante que o total seja número puro
-        novo_registro["total"] = float(novo_registro.get("total", 0.0))
+        # Cópia defensiva para não alterar o objeto usado pela interface.
+        registro = dict(novo_registro)
 
-        # Envia
-        supabase.table("orcamentos").insert(novo_registro).execute()
+        registro["numero"] = int(registro["numero"])
+        registro["cliente"] = str(registro["cliente"]).strip()
+        registro["data_entrega"] = str(registro["data_entrega"])
+        registro["itens"] = list(registro.get("itens") or [])
+        registro["embalagem_pedido"] = dict(
+            registro.get("embalagem_pedido")
+            or {"descricao": "", "valor": 0.0}
+        )
+        registro["embalagens_especiais"] = list(
+            registro.get("embalagens_especiais") or []
+        )
+        registro["adicionais"] = list(registro.get("adicionais") or [])
+        registro["observacao"] = str(registro.get("observacao") or "")
+        registro["desconto_generico"] = str(
+            registro.get("desconto_generico") or ""
+        )
+        registro["total"] = round(float(registro.get("total", 0.0)), 2)
+
+        # A coluna `dados` é NOT NULL. Ela recebe uma cópia completa dos dados
+        # variáveis do orçamento, mantendo compatibilidade com a estrutura atual.
+        registro["dados"] = {
+            "itens": registro["itens"],
+            "embalagem_pedido": registro["embalagem_pedido"],
+            "embalagens_especiais": registro["embalagens_especiais"],
+            "adicionais": registro["adicionais"],
+            "observacao": registro["observacao"],
+            "desconto_geral": registro["desconto_generico"],
+            "total": registro["total"],
+        }
+
+        response = supabase.table("orcamentos").insert(registro).execute()
+
+        if not response.data:
+            raise RuntimeError("O Supabase não confirmou a inclusão do registro.")
+
         return True
     except Exception as e:
         st.error(f"Erro ao salvar: {e}")
         return False
+
 
 CATALOGO = {
     "Brigadeiro de Chocolate": {"tipo": "unitario", "preco_cento": 125.00},
@@ -982,9 +1094,12 @@ with tab_novo:
         if st.button("GERAR IMAGEM FINAL", type="primary", use_container_width=True):
             if cliente.strip():
                 with st.spinner("Gerando e salvando orçamento no Supabase..."):
-                    # Busca o histórico do Supabase para saber qual o próximo número sequencial
-                    historico = carregar_historico_supabase()
-                    proximo_numero = max([o["numero"] for o in historico]) + 1 if historico else 1
+                    # Obtém o próximo número sequencial salvo no Supabase
+                    try:
+                        proximo_numero = obter_proximo_numero()
+                    except Exception as e:
+                        st.error(str(e))
+                        st.stop()
 
                     res = gerar_imagem(
                         cliente=cliente,
@@ -998,18 +1113,23 @@ with tab_novo:
                         observacao=st.session_state.observacao,
                     )
 
-                    # Estrutura exata para persistir no Supabase
+                    # Payload compatível com a estrutura real da tabela.
+                    # `dados` é preenchido dentro de salvar_orcamento_supabase.
                     novo_registro = {
-                        "numero": proximo_numero,
+                        "numero": int(proximo_numero),
                         "cliente": cliente.strip(),
-                        "data_entrega": data_ent.strftime("%Y-%m-%d"),
-                        "desconto_geral": st.session_state.desconto_geral,
-                        "embalagem_pedido": st.session_state.embalagem_pedido,
-                        "embalagens_especiais": st.session_state.embalagens_especiais,
-                        "adicionais": st.session_state.adicionais,
-                        "observacao": st.session_state.observacao,
-                        "itens": st.session_state.carrinho,
-                        "total": float(total_final_preview),
+                        "data_entrega": data_ent.isoformat(),
+                        "desconto_generico": st.session_state.desconto_geral.strip(),
+                        "embalagem_pedido": dict(
+                            st.session_state.embalagem_pedido
+                        ),
+                        "embalagens_especiais": list(
+                            st.session_state.embalagens_especiais
+                        ),
+                        "adicionais": list(st.session_state.adicionais),
+                        "observacao": st.session_state.observacao.strip(),
+                        "itens": list(st.session_state.carrinho),
+                        "total": round(float(total_final_preview), 2),
                     }
                     
                     # Salva no banco de dados definitivo do Supabase
@@ -1094,10 +1214,18 @@ with tab_busca:
 
                     st.caption("Resumo dos Itens do Pedido:")
                     for it in o.get("itens", []):
-                        if it["tipo"] == "unitario":
-                            st.write(f"• {it['qtd']}un de {it['produto']}")
+                        if not isinstance(it, dict):
+                            continue
+                        if it.get("tipo") == "unitario":
+                            st.write(
+                                f"• {int(it.get('qtd', 0))}un de "
+                                f"{it.get('produto', 'Produto')}"
+                            )
                         else:
-                            st.write(f"• {formatar_peso(it['gramas'])} de {it['produto']}")
+                            st.write(
+                                f"• {formatar_peso(int(it.get('gramas', 0)))} de "
+                                f"{it.get('produto', 'Produto')}"
+                            )
 
                     if st.button(f"🖼️ Visualizar/Re-gerar Imagem Nº {o['numero']:03d}", key=f"regerar_{o['numero']}_supabase"):
                         try:
@@ -1111,7 +1239,7 @@ with tab_busca:
                                 data_entrega=dt_ent_antigo,
                                 itens=o["itens"],
                                 numero_orcamento=o["numero"],
-                                desconto_geral_str=o.get("desconto_geral", ""),
+                                desconto_geral_str=o.get("desconto_generico", ""),
                                 embalagem_pedido=o.get("embalagem_pedido"),
                                 embalagens_especiais=o.get("embalagens_especiais"),
                                 adicionais=o.get("adicionais"),
