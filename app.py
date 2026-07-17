@@ -657,7 +657,7 @@ def gerar_imagem(
 
     draw.text(
         (50, y_resumo + 125),
-        "Data reservada mediante confirmation do pedido.",
+        "Data reservada mediante confirmação do pedido.",
         fill=cor_marrom_logo,
         font=carregar_fonte(14),
     )
