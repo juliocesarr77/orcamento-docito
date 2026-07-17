@@ -843,7 +843,21 @@ except Exception:
 
 st.title("Gerador de Orçamentos")
 
-tab_novo, tab_busca = st.tabs(["✍️ Criar Novo Orçamento", "🔍 Buscar e Histórico"])
+opcoes_paginas = [
+    "✍️ Criar Novo Orçamento",
+    "🔍 Buscar e Histórico",
+]
+
+if "pagina_ativa" not in st.session_state:
+    st.session_state.pagina_ativa = opcoes_paginas[0]
+
+st.radio(
+    "Navegação",
+    opcoes_paginas,
+    key="pagina_ativa",
+    horizontal=True,
+    label_visibility="collapsed",
+)
 
 if "carrinho" not in st.session_state:
     st.session_state.carrinho = []
@@ -868,8 +882,65 @@ if "editando_id" not in st.session_state:
 if "editando_numero" not in st.session_state:
     st.session_state.editando_numero = None
 
+
+def carregar_orcamento_para_edicao(orcamento):
+    """
+    Callback executado antes do novo ciclo do Streamlit.
+
+    Isso permite alterar valores ligados a widgets sem gerar:
+    StreamlitAPIException: session_state cannot be modified after widget creation.
+    """
+    o = normalizar_orcamento(orcamento)
+
+    try:
+        data_edicao = datetime.strptime(
+            str(o.get("data_entrega", ""))[:10],
+            "%Y-%m-%d",
+        ).date()
+    except Exception:
+        data_edicao = datetime.now().date()
+
+    itens_edicao = []
+    for indice, item in enumerate(o.get("itens") or []):
+        if not isinstance(item, dict):
+            continue
+
+        item_copia = dict(item)
+        if not item_copia.get("id"):
+            item_copia["id"] = (
+                f"edit_{o.get('numero', 0)}_{indice + 1}"
+            )
+        itens_edicao.append(item_copia)
+
+    st.session_state.editando_id = o.get("id")
+    st.session_state.editando_numero = int(o.get("numero", 0))
+    st.session_state.cliente_input = str(o.get("cliente") or "")
+    st.session_state.data_entrega_input = data_edicao
+    st.session_state.carrinho = itens_edicao
+    st.session_state.item_counter = len(itens_edicao)
+    st.session_state.desconto_geral = str(
+        o.get("desconto_geral") or ""
+    )
+    st.session_state.embalagem_pedido = dict(
+        o.get("embalagem_pedido")
+        or {"descricao": "", "valor": 0.0}
+    )
+    st.session_state.embalagens_especiais = list(
+        o.get("embalagens_especiais") or []
+    )
+    st.session_state.adicionais = list(
+        o.get("adicionais") or []
+    )
+    st.session_state.observacao = str(
+        o.get("observacao") or ""
+    )
+
+    # Troca automaticamente para a tela de criação/edição.
+    st.session_state.pagina_ativa = "✍️ Criar Novo Orçamento"
+
+
 # ABA 1: CRIAÇÃO DE NOVO ORÇAMENTO
-with tab_novo:
+if st.session_state.pagina_ativa == "✍️ Criar Novo Orçamento":
     if st.session_state.editando_id:
         st.info(
             f"✏️ Editando o orçamento Nº "
@@ -879,6 +950,7 @@ with tab_novo:
         if st.button("Cancelar edição e criar novo orçamento"):
             st.session_state.editando_id = None
             st.session_state.editando_numero = None
+            st.session_state.pagina_ativa = "✍️ Criar Novo Orçamento"
             st.session_state.cliente_input = ""
             st.session_state.data_entrega_input = datetime.now().date()
             st.session_state.carrinho = []
@@ -1308,7 +1380,7 @@ with tab_novo:
                 st.warning("Por favor, preencha o nome da cliente!")
 
 # ABA 2: HISTÓRICO E BUSCA DE ORÇAMENTOS
-with tab_busca:
+if st.session_state.pagina_ativa == "🔍 Buscar e Histórico":
     st.subheader("📚 Histórico de Orçamentos Arquivados")
 
     if st.session_state.editando_id:
@@ -1362,53 +1434,13 @@ with tab_busca:
 
                     col_editar, col_visualizar = st.columns(2)
 
-                    if col_editar.button(
+                    col_editar.button(
                         f"✏️ Editar Nº {o['numero']:03d}",
                         key=f"editar_{o.get('id', o['numero'])}",
                         use_container_width=True,
-                    ):
-                        try:
-                            data_edicao = datetime.strptime(
-                                str(o["data_entrega"])[:10],
-                                "%Y-%m-%d",
-                            ).date()
-                        except Exception:
-                            data_edicao = datetime.now().date()
-
-                        itens_edicao = []
-                        for indice, item in enumerate(o.get("itens") or []):
-                            if not isinstance(item, dict):
-                                continue
-                            item_copia = dict(item)
-                            if not item_copia.get("id"):
-                                item_copia["id"] = (
-                                    f"edit_{o['numero']}_{indice + 1}"
-                                )
-                            itens_edicao.append(item_copia)
-
-                        st.session_state.editando_id = o.get("id")
-                        st.session_state.editando_numero = int(o["numero"])
-                        st.session_state.cliente_input = o.get("cliente", "")
-                        st.session_state.data_entrega_input = data_edicao
-                        st.session_state.carrinho = itens_edicao
-                        st.session_state.item_counter = len(itens_edicao)
-                        st.session_state.desconto_geral = str(
-                            o.get("desconto_geral") or ""
-                        )
-                        st.session_state.embalagem_pedido = dict(
-                            o.get("embalagem_pedido")
-                            or {"descricao": "", "valor": 0.0}
-                        )
-                        st.session_state.embalagens_especiais = list(
-                            o.get("embalagens_especiais") or []
-                        )
-                        st.session_state.adicionais = list(
-                            o.get("adicionais") or []
-                        )
-                        st.session_state.observacao = str(
-                            o.get("observacao") or ""
-                        )
-                        st.rerun()
+                        on_click=carregar_orcamento_para_edicao,
+                        args=(o,),
+                    )
 
                     if col_visualizar.button(
                         f"🖼️ Visualizar Nº {o['numero']:03d}",
