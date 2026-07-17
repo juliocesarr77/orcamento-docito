@@ -138,9 +138,9 @@ def normalizar_orcamento(registro):
         if registro.get("observacao") is not None
         else dados.get("observacao", "")
     )
-    registro["desconto_generico"] = (
-        registro.get("desconto_generico")
-        if registro.get("desconto_generico") is not None
+    registro["desconto_geral"] = (
+        registro.get("desconto_geral")
+        if registro.get("desconto_geral") is not None
         else dados.get("desconto_geral", "")
     )
 
@@ -211,8 +211,8 @@ def salvar_orcamento_supabase(novo_registro):
         )
         registro["adicionais"] = list(registro.get("adicionais") or [])
         registro["observacao"] = str(registro.get("observacao") or "")
-        registro["desconto_generico"] = str(
-            registro.get("desconto_generico") or ""
+        registro["desconto_geral"] = str(
+            registro.get("desconto_geral") or ""
         )
         registro["total"] = round(float(registro.get("total", 0.0)), 2)
 
@@ -224,7 +224,7 @@ def salvar_orcamento_supabase(novo_registro):
             "embalagens_especiais": registro["embalagens_especiais"],
             "adicionais": registro["adicionais"],
             "observacao": registro["observacao"],
-            "desconto_geral": registro["desconto_generico"],
+            "desconto_geral": registro["desconto_geral"],
             "total": registro["total"],
         }
 
@@ -1119,7 +1119,7 @@ with tab_novo:
                         "numero": int(proximo_numero),
                         "cliente": cliente.strip(),
                         "data_entrega": data_ent.isoformat(),
-                        "desconto_generico": st.session_state.desconto_geral.strip(),
+                        "desconto_geral": st.session_state.desconto_geral.strip(),
                         "embalagem_pedido": dict(
                             st.session_state.embalagem_pedido
                         ),
@@ -1239,7 +1239,7 @@ with tab_busca:
                                 data_entrega=dt_ent_antigo,
                                 itens=o["itens"],
                                 numero_orcamento=o["numero"],
-                                desconto_geral_str=o.get("desconto_generico", ""),
+                                desconto_geral_str=o.get("desconto_geral", ""),
                                 embalagem_pedido=o.get("embalagem_pedido"),
                                 embalagens_especiais=o.get("embalagens_especiais"),
                                 adicionais=o.get("adicionais"),
