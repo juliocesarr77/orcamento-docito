@@ -101,7 +101,7 @@ def calcular_desconto(valor_base, desconto_str):
 def carregar_historico_supabase():
     try:
         # Busca todos os orçamentos ordenados pelo número
-        response = supabase.table("orcamentos").select("*").order("numero", descending=False).execute()
+        response = supabase.table("orcamentos").select("*").order("numero", desc=True).execute()
         return response.data if response.data else []
     except Exception as e:
         st.error(f"Erro ao buscar dados do Supabase: {e}")
