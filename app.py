@@ -358,10 +358,10 @@ def gerar_imagem(
         linhas = quebrar_texto_largura(draw, texto, fonte_texto, largura_desc)
         altura_linha = altura_linha_fonte(draw, fonte_texto)
 
-        for i, linha in enumerate(linhas):
+        for i, ... in enumerate(linhas):
             draw.text(
                 (x_desc, y + (i * altura_linha)),
-                linha,
+                linhas[i],
                 fill=cor_texto,
                 font=fonte_texto
             )
@@ -466,8 +466,8 @@ def gerar_imagem(
     total_emb_especiais = calcular_total_embalagens_especiais(embalagens_especiais)
     total_adicionais = calcular_total_adicionais(adicionais)
 
-    total_bruto_geral = total_bruto_itens + total_emb_pedido + total_emb_especiais + total_adicionais
-    total_com_desconto_itens = total_bruto_geral - total_desconto_itens
+    total_bruto_general = total_bruto_itens + total_emb_pedido + total_emb_especiais + total_adicionais
+    total_com_desconto_itens = total_bruto_general - total_desconto_itens
     desconto_geral_valor, _ = calcular_desconto(total_com_desconto_itens, desconto_geral_str)
     total_final = total_com_desconto_itens - desconto_geral_valor
 
@@ -503,7 +503,7 @@ def gerar_imagem(
     )
     draw.text(
         (520, y_resumo),
-        formatar_real(total_bruto_geral),
+        formatar_real(total_bruto_general),
         fill=cor_marrom_logo,
         font=carregar_fonte(18, True),
     )
@@ -630,7 +630,7 @@ def gerar_imagem(
 
     draw.text(
         (50, y_resumo + 125),
-        "Data reservada mediante confirmação do pedido.",
+        "Data reservada mediante confirmation do pedido.",
         fill=cor_marrom_logo,
         font=carregar_fonte(14)
     )
@@ -700,6 +700,9 @@ st.title("Gerador de Orçamentos")
 if "carrinho" not in st.session_state:
     st.session_state.carrinho = []
 
+if "item_counter" not in st.session_state:
+    st.session_state.item_counter = 0
+
 if "desconto_geral" not in st.session_state:
     st.session_state.desconto_geral = ""
 
@@ -719,7 +722,7 @@ col_c1, col_c2 = st.columns(2)
 with col_c1:
     cliente = st.text_input("Nome da Cliente")
 with col_c2:
-    data_ent = st.date_input("Data da Entrega", value=datetime.now())
+    data_ent = st.date_input("Data da Entrega", value=datetime.now().date())
 
 st.divider()
 
@@ -740,8 +743,10 @@ if dados_produto["tipo"] == "unitario":
     with c4:
         st.write(" ")
         if st.button("➕ Adicionar produto"):
+            st.session_state.item_counter += 1
             st.session_state.carrinho.append(
                 {
+                    "id": f"prod_{st.session_state.item_counter}",
                     "produto": produto_selecionado,
                     "tipo": "unitario",
                     "qtd": int(qtd_unit),
@@ -788,8 +793,10 @@ else:
     with c5:
         st.write(" ")
         if st.button("➕ Adicionar produto em massa"):
+            st.session_state.item_counter += 1
             st.session_state.carrinho.append(
                 {
+                    "id": f"prod_{st.session_state.item_counter}",
                     "produto": produto_selecionado,
                     "tipo": "kg",
                     "gramas": int(gramas_item),
@@ -934,6 +941,8 @@ if tem_conteudo:
         total_bruto_preview_itens += subtotal_bruto
         total_desc_itens_preview += desconto_item_valor
 
+        item_id = item.get("id", f"fallback_{i}")
+
         if item["tipo"] == "unitario":
             total_doces_preview += item["qtd"]
 
@@ -948,14 +957,14 @@ if tem_conteudo:
                 "Qtd",
                 min_value=1,
                 value=int(item["qtd"]),
-                key=f"edit_qtd_{i}",
+                key=f"edit_qtd_{item_id}",
                 label_visibility="collapsed",
             )
 
             novo_desc = col_desc.text_input(
                 "Desconto",
                 value=item.get("desconto", ""),
-                key=f"desc_{i}",
+                key=f"desc_{item_id}",
                 placeholder="10% ou R$2",
                 label_visibility="collapsed",
             )
@@ -973,7 +982,7 @@ if tem_conteudo:
             if alterou:
                 st.rerun()
 
-            if col_bt.button("❌", key=f"del_{i}"):
+            if col_bt.button("❌", key=f"del_{item_id}"):
                 st.session_state.carrinho.pop(i)
                 st.rerun()
 
@@ -991,7 +1000,7 @@ if tem_conteudo:
                 "Unidade",
                 ["kg", "g"],
                 index=0 if item["gramas"] % 1000 == 0 else 1,
-                key=f"unidade_edit_{i}",
+                key=f"unidade_edit_{item_id}",
                 label_visibility="collapsed",
             )
 
@@ -1003,7 +1012,7 @@ if tem_conteudo:
                     value=float(valor_padrao),
                     step=0.1,
                     format="%.3f",
-                    key=f"peso_kg_{i}",
+                    key=f"peso_kg_{item_id}",
                     label_visibility="collapsed",
                 )
                 novas_gramas = int(round(novo_valor_peso * 1000))
@@ -1013,7 +1022,7 @@ if tem_conteudo:
                     min_value=100,
                     value=int(item["gramas"]),
                     step=50,
-                    key=f"peso_g_{i}",
+                    key=f"peso_g_{item_id}",
                     label_visibility="collapsed",
                 )
                 novas_gramas = int(novo_valor_peso)
@@ -1021,7 +1030,7 @@ if tem_conteudo:
             novo_desc = col_desc.text_input(
                 "Desconto",
                 value=item.get("desconto", ""),
-                key=f"desc_kg_{i}",
+                key=f"desc_kg_{item_id}",
                 placeholder="10% ou R$2",
                 label_visibility="collapsed",
             )
@@ -1039,7 +1048,7 @@ if tem_conteudo:
             if alterou:
                 st.rerun()
 
-            if col_bt.button("❌", key=f"del_kg_{i}"):
+            if col_bt.button("❌", key=f"del_kg_{item_id}"):
                 st.session_state.carrinho.pop(i)
                 st.rerun()
 
@@ -1093,6 +1102,7 @@ if tem_conteudo:
 
     if st.button("LIMPAR TUDO", type="secondary"):
         st.session_state.carrinho = []
+        st.session_state.item_counter = 0
         st.session_state.desconto_geral = ""
         st.session_state.embalagem_pedido = {"descricao": "", "valor": 0.0}
         st.session_state.embalagens_especiais = []
