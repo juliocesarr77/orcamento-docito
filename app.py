@@ -63,7 +63,7 @@ def quebrar_texto_largura(draw, texto, fonte, largura_max):
             continue
         linha_atual = ""
         for palavra in palavras:
-            teste = palabra if not linha_atual else f"{linha_atual} {palavra}"
+            teste = palavra if not linha_atual else f"{linha_atual} {palavra}"
             if largura_texto(draw, teste, fonte) <= largura_max:
                 linha_atual = teste
             else:
