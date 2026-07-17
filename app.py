@@ -187,56 +187,81 @@ def obter_proximo_numero():
             .execute()
         )
         if response.data:
-            return int(response.data[0]["numero"]) + 1
-        return 1
+            maior_numero = int(response.data[0]["numero"])
+            return max(234, maior_numero + 1)
+        return 234
     except Exception as e:
         raise RuntimeError(f"Não foi possível obter o próximo número: {e}") from e
 
 
+def preparar_registro_supabase(novo_registro):
+    """Prepara o registro para inserir ou atualizar no Supabase."""
+    registro = dict(novo_registro)
+
+    registro["numero"] = int(registro["numero"])
+    registro["cliente"] = str(registro["cliente"]).strip()
+    registro["data_entrega"] = str(registro["data_entrega"])
+    registro["itens"] = list(registro.get("itens") or [])
+    registro["embalagem_pedido"] = dict(
+        registro.get("embalagem_pedido")
+        or {"descricao": "", "valor": 0.0}
+    )
+    registro["embalagens_especiais"] = list(
+        registro.get("embalagens_especiais") or []
+    )
+    registro["adicionais"] = list(registro.get("adicionais") or [])
+    registro["observacao"] = str(registro.get("observacao") or "")
+    registro["desconto_geral"] = str(registro.get("desconto_geral") or "")
+    registro["total"] = round(float(registro.get("total", 0.0)), 2)
+
+    if not registro["cliente"]:
+        raise ValueError("O nome da cliente não pode ficar vazio.")
+
+    registro["dados"] = {
+        "itens": registro["itens"],
+        "embalagem_pedido": registro["embalagem_pedido"],
+        "embalagens_especiais": registro["embalagens_especiais"],
+        "adicionais": registro["adicionais"],
+        "observacao": registro["observacao"],
+        "desconto_geral": registro["desconto_geral"],
+        "total": registro["total"],
+    }
+
+    return registro
+
+
 def salvar_orcamento_supabase(novo_registro):
     try:
-        # Cópia defensiva para não alterar o objeto usado pela interface.
-        registro = dict(novo_registro)
-
-        registro["numero"] = int(registro["numero"])
-        registro["cliente"] = str(registro["cliente"]).strip()
-        registro["data_entrega"] = str(registro["data_entrega"])
-        registro["itens"] = list(registro.get("itens") or [])
-        registro["embalagem_pedido"] = dict(
-            registro.get("embalagem_pedido")
-            or {"descricao": "", "valor": 0.0}
-        )
-        registro["embalagens_especiais"] = list(
-            registro.get("embalagens_especiais") or []
-        )
-        registro["adicionais"] = list(registro.get("adicionais") or [])
-        registro["observacao"] = str(registro.get("observacao") or "")
-        registro["desconto_geral"] = str(
-            registro.get("desconto_geral") or ""
-        )
-        registro["total"] = round(float(registro.get("total", 0.0)), 2)
-
-        # A coluna `dados` é NOT NULL. Ela recebe uma cópia completa dos dados
-        # variáveis do orçamento, mantendo compatibilidade com a estrutura atual.
-        registro["dados"] = {
-            "itens": registro["itens"],
-            "embalagem_pedido": registro["embalagem_pedido"],
-            "embalagens_especiais": registro["embalagens_especiais"],
-            "adicionais": registro["adicionais"],
-            "observacao": registro["observacao"],
-            "desconto_geral": registro["desconto_geral"],
-            "total": registro["total"],
-        }
-
+        registro = preparar_registro_supabase(novo_registro)
         response = supabase.table("orcamentos").insert(registro).execute()
-
         if not response.data:
-            raise RuntimeError("O Supabase não confirmou a inclusão do registro.")
-
+            raise RuntimeError("O Supabase não confirmou a inclusão.")
         return True
     except Exception as e:
         st.error(f"Erro ao salvar: {e}")
         return False
+
+
+def atualizar_orcamento_supabase(orcamento_id, registro_atualizado):
+    """Atualiza o registro existente sem alterar seu número."""
+    try:
+        if not orcamento_id:
+            raise ValueError("Identificador do orçamento não encontrado.")
+
+        registro = preparar_registro_supabase(registro_atualizado)
+        response = (
+            supabase.table("orcamentos")
+            .update(registro)
+            .eq("id", str(orcamento_id))
+            .execute()
+        )
+        if not response.data:
+            raise RuntimeError("O Supabase não confirmou a atualização.")
+        return True
+    except Exception as e:
+        st.error(f"Erro ao atualizar: {e}")
+        return False
+
 
 
 CATALOGO = {
@@ -834,14 +859,51 @@ if "adicionais" not in st.session_state:
     st.session_state.adicionais = []
 if "observacao" not in st.session_state:
     st.session_state.observacao = ""
+if "cliente_input" not in st.session_state:
+    st.session_state.cliente_input = ""
+if "data_entrega_input" not in st.session_state:
+    st.session_state.data_entrega_input = datetime.now().date()
+if "editando_id" not in st.session_state:
+    st.session_state.editando_id = None
+if "editando_numero" not in st.session_state:
+    st.session_state.editando_numero = None
 
 # ABA 1: CRIAÇÃO DE NOVO ORÇAMENTO
 with tab_novo:
+    if st.session_state.editando_id:
+        st.info(
+            f"✏️ Editando o orçamento Nº "
+            f"{int(st.session_state.editando_numero):03d}. "
+            "O número será mantido."
+        )
+        if st.button("Cancelar edição e criar novo orçamento"):
+            st.session_state.editando_id = None
+            st.session_state.editando_numero = None
+            st.session_state.cliente_input = ""
+            st.session_state.data_entrega_input = datetime.now().date()
+            st.session_state.carrinho = []
+            st.session_state.item_counter = 0
+            st.session_state.desconto_geral = ""
+            st.session_state.embalagem_pedido = {
+                "descricao": "",
+                "valor": 0.0,
+            }
+            st.session_state.embalagens_especiais = []
+            st.session_state.adicionais = []
+            st.session_state.observacao = ""
+            st.rerun()
+
     col_c1, col_c2 = st.columns(2)
     with col_c1:
-        cliente = st.text_input("Nome da Cliente")
+        cliente = st.text_input(
+            "Nome da Cliente",
+            key="cliente_input",
+        )
     with col_c2:
-        data_ent = st.date_input("Data da Entrega", value=datetime.now().date())
+        data_ent = st.date_input(
+            "Data da Entrega",
+            key="data_entrega_input",
+        )
 
     st.divider()
     st.subheader("Adicionar produtos")
@@ -1085,58 +1147,101 @@ with tab_novo:
             st.session_state.carrinho = []
             st.session_state.item_counter = 0
             st.session_state.desconto_geral = ""
-            st.session_state.embalagem_pedido = {"descricao": "", "valor": 0.0}
+            st.session_state.embalagem_pedido = {
+                "descricao": "",
+                "valor": 0.0,
+            }
             st.session_state.embalagens_especiais = []
             st.session_state.adicionais = []
             st.session_state.observacao = ""
+            st.session_state.cliente_input = ""
+            st.session_state.data_entrega_input = datetime.now().date()
+            st.session_state.editando_id = None
+            st.session_state.editando_numero = None
             st.rerun()
 
-        if st.button("GERAR IMAGEM FINAL", type="primary", use_container_width=True):
+        texto_botao_salvar = (
+            "SALVAR ALTERAÇÕES E GERAR IMAGEM"
+            if st.session_state.editando_id
+            else "GERAR IMAGEM FINAL"
+        )
+
+        if st.button(
+            texto_botao_salvar,
+            type="primary",
+            use_container_width=True,
+        ):
             if cliente.strip():
-                with st.spinner("Gerando e salvando orçamento no Supabase..."):
-                    # Obtém o próximo número sequencial salvo no Supabase
-                    try:
-                        proximo_numero = obter_proximo_numero()
-                    except Exception as e:
-                        st.error(str(e))
-                        st.stop()
+                modo_edicao = bool(st.session_state.editando_id)
+
+                with st.spinner(
+                    "Atualizando orçamento no Supabase..."
+                    if modo_edicao
+                    else "Gerando e salvando orçamento no Supabase..."
+                ):
+                    if modo_edicao:
+                        numero_orcamento = int(
+                            st.session_state.editando_numero
+                        )
+                    else:
+                        try:
+                            numero_orcamento = obter_proximo_numero()
+                        except Exception as e:
+                            st.error(str(e))
+                            st.stop()
 
                     res = gerar_imagem(
                         cliente=cliente,
                         data_entrega=data_ent,
                         itens=st.session_state.carrinho,
-                        numero_orcamento=proximo_numero,
+                        numero_orcamento=numero_orcamento,
                         desconto_geral_str=st.session_state.desconto_geral,
                         embalagem_pedido=st.session_state.embalagem_pedido,
-                        embalagens_especiais=st.session_state.embalagens_especiais,
+                        embalagens_especiais=(
+                            st.session_state.embalagens_especiais
+                        ),
                         adicionais=st.session_state.adicionais,
                         observacao=st.session_state.observacao,
                     )
 
-                    # Payload compatível com a estrutura real da tabela.
-                    # `dados` é preenchido dentro de salvar_orcamento_supabase.
-                    novo_registro = {
-                        "numero": int(proximo_numero),
+                    registro = {
+                        "numero": int(numero_orcamento),
                         "cliente": cliente.strip(),
                         "data_entrega": data_ent.isoformat(),
-                        "desconto_geral": st.session_state.desconto_geral.strip(),
+                        "desconto_geral": (
+                            st.session_state.desconto_geral.strip()
+                        ),
                         "embalagem_pedido": dict(
                             st.session_state.embalagem_pedido
                         ),
                         "embalagens_especiais": list(
                             st.session_state.embalagens_especiais
                         ),
-                        "adicionais": list(st.session_state.adicionais),
-                        "observacao": st.session_state.observacao.strip(),
+                        "adicionais": list(
+                            st.session_state.adicionais
+                        ),
+                        "observacao": (
+                            st.session_state.observacao.strip()
+                        ),
                         "itens": list(st.session_state.carrinho),
                         "total": round(float(total_final_preview), 2),
                     }
-                    
-                    # Salva no banco de dados definitivo do Supabase
-                    sucesso = salvar_orcamento_supabase(novo_registro)
+
+                    if modo_edicao:
+                        sucesso = atualizar_orcamento_supabase(
+                            st.session_state.editando_id,
+                            registro,
+                        )
+                    else:
+                        sucesso = salvar_orcamento_supabase(registro)
 
                     if sucesso:
-                        st.success(f"Orçamento Nº {proximo_numero:03d} arquivado permanentemente!")
+                        mensagem = (
+                            f"Orçamento Nº {numero_orcamento:03d} atualizado!"
+                            if modo_edicao
+                            else f"Orçamento Nº {numero_orcamento:03d} arquivado!"
+                        )
+                        st.success(mensagem)
                         st.image(res)
 
                         col_b1, col_b2 = st.columns(2)
@@ -1144,11 +1249,17 @@ with tab_novo:
                             st.download_button(
                                 "📥 Baixar Orçamento",
                                 res,
-                                f"Docito_N{proximo_numero:03d}_{cliente.strip()}.png",
+                                (
+                                    f"Docito_N{numero_orcamento:03d}_"
+                                    f"{cliente.strip()}.png"
+                                ),
                                 "image/png",
+                                key=f"download_atual_{numero_orcamento}",
                             )
                         with col_b2:
-                            img_base64 = base64.b64encode(res.getvalue()).decode()
+                            img_base64 = base64.b64encode(
+                                res.getvalue()
+                            ).decode()
                             copy_script = f"""
                             <button onclick="copyImage()" style="
                                 width: 100%;
@@ -1166,24 +1277,46 @@ with tab_novo:
                             <script>
                             async function copyImage() {{
                                 try {{
-                                    const response = await fetch("data:image/png;base64,{img_base64}");
+                                    const response = await fetch(
+                                        "data:image/png;base64,{img_base64}"
+                                    );
                                     const blob = await response.blob();
-                                    const item = new ClipboardItem({{"image/png": blob}});
+                                    const item = new ClipboardItem(
+                                        {{"image/png": blob}}
+                                    );
                                     await navigator.clipboard.write([item]);
-                                    alert("Imagem copiada! Agora é só colar no WhatsApp.");
+                                    alert(
+                                        "Imagem copiada! Agora é só colar "
+                                        + "no WhatsApp."
+                                    );
                                 }} catch (err) {{
-                                    alert("Seu navegador pode não permitir copiar imagem diretamente. Use o botão de baixar.");
+                                    alert(
+                                        "Seu navegador pode não permitir "
+                                        + "copiar imagem diretamente. "
+                                        + "Use o botão de baixar."
+                                    );
                                 }}
                             }}
                             </script>
                             """
                             st.components.v1.html(copy_script, height=55)
+
+                        if modo_edicao:
+                            st.session_state.editando_id = None
+                            st.session_state.editando_numero = None
             else:
                 st.warning("Por favor, preencha o nome da cliente!")
 
 # ABA 2: HISTÓRICO E BUSCA DE ORÇAMENTOS
 with tab_busca:
     st.subheader("📚 Histórico de Orçamentos Arquivados")
+
+    if st.session_state.editando_id:
+        st.success(
+            f"O orçamento Nº "
+            f"{int(st.session_state.editando_numero):03d} foi carregado. "
+            "Abra a aba “Criar Novo Orçamento” para editar."
+        )
     
     # Puxa os dados direto do Supabase em tempo real
     historico_salvo = carregar_historico_supabase()
@@ -1227,23 +1360,103 @@ with tab_busca:
                                 f"{it.get('produto', 'Produto')}"
                             )
 
-                    if st.button(f"🖼️ Visualizar/Re-gerar Imagem Nº {o['numero']:03d}", key=f"regerar_{o['numero']}_supabase"):
+                    col_editar, col_visualizar = st.columns(2)
+
+                    if col_editar.button(
+                        f"✏️ Editar Nº {o['numero']:03d}",
+                        key=f"editar_{o.get('id', o['numero'])}",
+                        use_container_width=True,
+                    ):
                         try:
-                            dt_ent_antigo = datetime.strptime(o["data_entrega"], "%Y-%m-%d").date()
+                            data_edicao = datetime.strptime(
+                                str(o["data_entrega"])[:10],
+                                "%Y-%m-%d",
+                            ).date()
+                        except Exception:
+                            data_edicao = datetime.now().date()
+
+                        itens_edicao = []
+                        for indice, item in enumerate(o.get("itens") or []):
+                            if not isinstance(item, dict):
+                                continue
+                            item_copia = dict(item)
+                            if not item_copia.get("id"):
+                                item_copia["id"] = (
+                                    f"edit_{o['numero']}_{indice + 1}"
+                                )
+                            itens_edicao.append(item_copia)
+
+                        st.session_state.editando_id = o.get("id")
+                        st.session_state.editando_numero = int(o["numero"])
+                        st.session_state.cliente_input = o.get("cliente", "")
+                        st.session_state.data_entrega_input = data_edicao
+                        st.session_state.carrinho = itens_edicao
+                        st.session_state.item_counter = len(itens_edicao)
+                        st.session_state.desconto_geral = str(
+                            o.get("desconto_geral") or ""
+                        )
+                        st.session_state.embalagem_pedido = dict(
+                            o.get("embalagem_pedido")
+                            or {"descricao": "", "valor": 0.0}
+                        )
+                        st.session_state.embalagens_especiais = list(
+                            o.get("embalagens_especiais") or []
+                        )
+                        st.session_state.adicionais = list(
+                            o.get("adicionais") or []
+                        )
+                        st.session_state.observacao = str(
+                            o.get("observacao") or ""
+                        )
+                        st.rerun()
+
+                    if col_visualizar.button(
+                        f"🖼️ Visualizar Nº {o['numero']:03d}",
+                        key=f"regerar_{o.get('id', o['numero'])}",
+                        use_container_width=True,
+                    ):
+                        try:
+                            dt_ent_antigo = datetime.strptime(
+                                str(o["data_entrega"])[:10],
+                                "%Y-%m-%d",
+                            ).date()
                         except Exception:
                             dt_ent_antigo = datetime.now().date()
 
-                        with st.spinner("Buscando e renderizando dados do Supabase..."):
+                        with st.spinner(
+                            "Buscando e renderizando dados do Supabase..."
+                        ):
                             res_antigo = gerar_imagem(
                                 cliente=o["cliente"],
                                 data_entrega=dt_ent_antigo,
                                 itens=o["itens"],
                                 numero_orcamento=o["numero"],
-                                desconto_geral_str=o.get("desconto_geral", ""),
-                                embalagem_pedido=o.get("embalagem_pedido"),
-                                embalagens_especiais=o.get("embalagens_especiais"),
+                                desconto_geral_str=o.get(
+                                    "desconto_geral",
+                                    "",
+                                ),
+                                embalagem_pedido=o.get(
+                                    "embalagem_pedido"
+                                ),
+                                embalagens_especiais=o.get(
+                                    "embalagens_especiais"
+                                ),
                                 adicionais=o.get("adicionais"),
                                 observacao=o.get("observacao", ""),
+                            )
+                            st.image(res_antigo)
+                            st.download_button(
+                                "📥 Baixar este Orçamento",
+                                res_antigo,
+                                (
+                                    f"Docito_N{o['numero']:03d}_"
+                                    f"{o['cliente']}.png"
+                                ),
+                                "image/png",
+                                key=(
+                                    f"dl_antigo_"
+                                    f"{o.get('id', o['numero'])}"
+                                ),
                             )
                             st.image(res_antigo)
                             st.download_button(
