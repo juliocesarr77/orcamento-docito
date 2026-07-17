@@ -66,7 +66,7 @@ def quebrar_texto_largura(draw, texto, fonte, largura_max):
             else:
                 if linha_atual:
                     linhas_finais.append(linha_atual)
-                linha_atual = palavra
+                linha_atual = palabra
 
         if linha_atual:
             linhas_finais.append(linha_atual)
@@ -159,7 +159,10 @@ def gerar_texto_item(item):
 
 
 def calcular_total_embalagens_pedido(embalagem_pedido):
-    if embalagem_pedido.get("descricao", "").strip() and embalagem_pedido.get("valor", 0) > 0:
+    if (
+        embalagem_pedido.get("descricao", "").strip()
+        and embalagem_pedido.get("valor", 0) > 0
+    ):
         return float(embalagem_pedido["valor"])
     return 0.0
 
@@ -186,7 +189,7 @@ def gerar_imagem(
     embalagem_pedido=None,
     embalagens_especiais=None,
     adicionais=None,
-    observacao=""
+    observacao="",
 ):
     embalagem_pedido = embalagem_pedido or {"descricao": "", "valor": 0.0}
     embalagens_especiais = embalagens_especiais or []
@@ -195,7 +198,10 @@ def gerar_imagem(
     W = 700
 
     total_linhas = len(itens) + len(embalagens_especiais) + len(adicionais)
-    if embalagem_pedido.get("descricao", "").strip() and embalagem_pedido.get("valor", 0) > 0:
+    if (
+        embalagem_pedido.get("descricao", "").strip()
+        and embalagem_pedido.get("valor", 0) > 0
+    ):
         total_linhas += 1
 
     if total_linhas <= 8:
@@ -238,15 +244,17 @@ def gerar_imagem(
 
         extra = 24 if tem_detalhe else 0
 
-        return max(
-            espaco_linha,
-            len(linhas) * altura_linha + extra + 8
-        )
+        return max(espaco_linha, len(linhas) * altura_linha + extra + 8)
 
     total_altura_itens = 0
 
     for item in itens:
-        subtotal_bruto, desconto_item_valor, desconto_item_desc, subtotal_final = calcular_subtotal_item(item)
+        (
+            subtotal_bruto,
+            desconto_item_valor,
+            desconto_item_desc,
+            subtotal_final,
+        ) = calcular_subtotal_item(item)
 
         texto_prev = gerar_texto_item(item)
 
@@ -254,15 +262,16 @@ def gerar_imagem(
             texto_prev += f" (-{desconto_item_desc})"
 
         total_altura_itens += altura_bloco_orcamento(
-            texto_prev,
-            tem_detalhe=bool(desconto_item_desc)
+            texto_prev, tem_detalhe=bool(desconto_item_desc)
         )
 
-    if embalagem_pedido.get("descricao", "").strip() and embalagem_pedido.get("valor", 0) > 0:
+    if (
+        embalagem_pedido.get("descricao", "").strip()
+        and embalagem_pedido.get("valor", 0) > 0
+    ):
         texto_prev = f"Embalagem do pedido - {embalagem_pedido['descricao']}"
         total_altura_itens += altura_bloco_orcamento(
-            texto_prev,
-            fonte=carregar_fonte(tam_fonte_item, True)
+            texto_prev, fonte=carregar_fonte(tam_fonte_item, True)
         )
 
     for emb in embalagens_especiais:
@@ -277,10 +286,7 @@ def gerar_imagem(
     if observacao.strip():
         fonte_obs_previa = carregar_fonte(14)
         linhas_obs_previas = quebrar_texto_largura(
-            draw_medida,
-            observacao.strip(),
-            fonte_obs_previa,
-            600
+            draw_medida, observacao.strip(), fonte_obs_previa, 600
         )
         altura_obs = 40 + (len(linhas_obs_previas) * 22)
 
@@ -310,7 +316,7 @@ def gerar_imagem(
             (220, 40),
             "DOCITO DOCERIA",
             fill=cor_marrom_logo,
-            font=carregar_fonte(30, True)
+            font=carregar_fonte(30, True),
         )
 
     # DADOS
@@ -318,19 +324,19 @@ def gerar_imagem(
         (50, y_pos),
         "ORÇAMENTO DE DOCES",
         fill=cor_marrom_logo,
-        font=carregar_fonte(26, True)
+        font=carregar_fonte(26, True),
     )
     draw.text(
         (50, y_pos + 50),
         f"CLIENTE: {cliente.upper()}",
         fill=cor_marrom_logo,
-        font=carregar_fonte(18, True)
+        font=carregar_fonte(18, True),
     )
     draw.text(
         (50, y_pos + 80),
         f"ENTREGA: {data_entrega.strftime('%d/%m/%Y')}",
         fill=cor_destaque,
-        font=carregar_fonte(18, True)
+        font=carregar_fonte(18, True),
     )
     draw.line((50, y_pos + 115, 650, y_pos + 115), fill=cor_fundo_logo, width=3)
 
@@ -350,7 +356,7 @@ def gerar_imagem(
         fonte_texto,
         cor_valor=None,
         fonte_valor=None,
-        detalhe_desc=None
+        detalhe_desc=None,
     ):
         cor_valor = cor_valor or cor_texto
         fonte_valor = fonte_valor or fonte_texto
@@ -358,12 +364,12 @@ def gerar_imagem(
         linhas = quebrar_texto_largura(draw, texto, fonte_texto, largura_desc)
         altura_linha = altura_linha_fonte(draw, fonte_texto)
 
-        for i, ... in enumerate(linhas):
+        for i, linha in enumerate(linhas):
             draw.text(
                 (x_desc, y + (i * altura_linha)),
-                linhas[i],
+                linha,
                 fill=cor_texto,
-                font=fonte_texto
+                font=fonte_texto,
             )
 
         bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_valor)
@@ -373,7 +379,7 @@ def gerar_imagem(
             (x_preco_direita - largura_valor, y),
             texto_valor,
             fill=cor_valor,
-            font=fonte_valor
+            font=fonte_valor,
         )
 
         altura_usada = len(linhas) * altura_linha
@@ -383,14 +389,19 @@ def gerar_imagem(
                 (x_desc + 15, y + altura_usada),
                 detalhe_desc,
                 fill=cor_cinza,
-                font=carregar_fonte(max(tam_fonte_item - 4, 11))
+                font=carregar_fonte(max(tam_fonte_item - 4, 11)),
             )
             altura_usada += 24
 
         return y + max(espaco_linha, altura_usada + 8)
 
     for item in itens:
-        subtotal_bruto, desconto_item_valor, desconto_item_desc, subtotal_final = calcular_subtotal_item(item)
+        (
+            subtotal_bruto,
+            desconto_item_valor,
+            desconto_item_desc,
+            subtotal_final,
+        ) = calcular_subtotal_item(item)
 
         total_bruto_itens += subtotal_bruto
         total_desconto_itens += desconto_item_valor
@@ -420,7 +431,7 @@ def gerar_imagem(
             texto_valor=texto_valor,
             cor_texto=cor_marrom_logo,
             fonte_texto=fonte_item,
-            detalhe_desc=detalhe_desc
+            detalhe_desc=detalhe_desc,
         )
 
     # EMBALAGEM DO PEDIDO
@@ -433,7 +444,7 @@ def gerar_imagem(
             cor_texto=cor_secao,
             fonte_texto=carregar_fonte(tam_fonte_item, True),
             cor_valor=cor_secao,
-            fonte_valor=fonte_item
+            fonte_valor=fonte_item,
         )
 
     # EMBALAGENS ESPECIAIS
@@ -447,7 +458,7 @@ def gerar_imagem(
             texto=texto,
             texto_valor=texto_valor,
             cor_texto=cor_secao,
-            fonte_texto=fonte_item
+            fonte_texto=fonte_item,
         )
 
     # ADICIONAIS
@@ -460,15 +471,19 @@ def gerar_imagem(
             texto=texto,
             texto_valor=texto_valor,
             cor_texto=cor_secao,
-            fonte_texto=fonte_item
+            fonte_texto=fonte_item,
         )
 
     total_emb_especiais = calcular_total_embalagens_especiais(embalagens_especiais)
     total_adicionais = calcular_total_adicionais(adicionais)
 
-    total_bruto_general = total_bruto_itens + total_emb_pedido + total_emb_especiais + total_adicionais
+    total_bruto_general = (
+        total_bruto_itens + total_emb_pedido + total_emb_especiais + total_adicionais
+    )
     total_com_desconto_itens = total_bruto_general - total_desconto_itens
-    desconto_geral_valor, _ = calcular_desconto(total_com_desconto_itens, desconto_geral_str)
+    desconto_geral_valor, _ = calcular_desconto(
+        total_com_desconto_itens, desconto_geral_str
+    )
     total_final = total_com_desconto_itens - desconto_geral_valor
 
     # RESUMO
@@ -510,18 +525,40 @@ def gerar_imagem(
 
     if total_emb_pedido > 0:
         y_resumo += 30
-        draw.text((50, y_resumo), "Embalagem do pedido", fill=cor_cinza, font=carregar_fonte(14))
-        draw.text((520, y_resumo), formatar_real(total_emb_pedido), fill=cor_cinza, font=carregar_fonte(14))
+        draw.text(
+            (50, y_resumo), "Embalagem do pedido", fill=cor_cinza, font=carregar_fonte(14)
+        )
+        draw.text(
+            (520, y_resumo),
+            formatar_real(total_emb_pedido),
+            fill=cor_cinza,
+            font=carregar_fonte(14),
+        )
 
     if total_emb_especiais > 0:
         y_resumo += 25
-        draw.text((50, y_resumo), "Embalagens especiais", fill=cor_cinza, font=carregar_fonte(14))
-        draw.text((520, y_resumo), formatar_real(total_emb_especiais), fill=cor_cinza, font=carregar_fonte(14))
+        draw.text(
+            (50, y_resumo),
+            "Embalagens especiais",
+            fill=cor_cinza,
+            font=carregar_fonte(14),
+        )
+        draw.text(
+            (520, y_resumo),
+            formatar_real(total_emb_especiais),
+            fill=cor_cinza,
+            font=carregar_fonte(14),
+        )
 
     if total_adicionais > 0:
         y_resumo += 25
         draw.text((50, y_resumo), "Adicionais", fill=cor_cinza, font=carregar_fonte(14))
-        draw.text((520, y_resumo), formatar_real(total_adicionais), fill=cor_cinza, font=carregar_fonte(14))
+        draw.text(
+            (520, y_resumo),
+            formatar_real(total_adicionais),
+            fill=cor_cinza,
+            font=carregar_fonte(14),
+        )
 
     if total_desconto_itens > 0:
         y_resumo += 35
@@ -566,12 +603,7 @@ def gerar_imagem(
         y_resumo += 25
 
         fonte_obs = carregar_fonte(14)
-        linhas_obs = quebrar_texto_largura(
-            draw,
-            observacao.strip(),
-            fonte_obs,
-            600
-        )
+        linhas_obs = quebrar_texto_largura(draw, observacao.strip(), fonte_obs, 600)
 
         for linha in linhas_obs:
             draw.text(
@@ -599,40 +631,35 @@ def gerar_imagem(
     largura_total = bbox_total[2] - bbox_total[0]
     x_total = 650 - largura_total
 
-    draw.text(
-        (x_total, y_resumo),
-        texto_total,
-        fill=cor_destaque,
-        font=fonte_total
-    )
+    draw.text((x_total, y_resumo), texto_total, fill=cor_destaque, font=fonte_total)
 
     # PAGAMENTO
     draw.text(
         (50, y_resumo + 50),
         "FORMAS DE PAGAMENTO",
         fill=cor_marrom_logo,
-        font=carregar_fonte(16, True)
+        font=carregar_fonte(16, True),
     )
 
     draw.text(
         (50, y_resumo + 75),
         "Pix | Dinheiro | Cartão | Criptomoedas",
         fill=cor_marrom_logo,
-        font=carregar_fonte(16)
+        font=carregar_fonte(16),
     )
 
     draw.text(
         (50, y_resumo + 100),
         "Cartão em até 12x com acréscimo da maquininha.",
         fill=cor_marrom_logo,
-        font=carregar_fonte(14)
+        font=carregar_fonte(14),
     )
 
     draw.text(
         (50, y_resumo + 125),
         "Data reservada mediante confirmation do pedido.",
         fill=cor_marrom_logo,
-        font=carregar_fonte(14)
+        font=carregar_fonte(14),
     )
 
     # VALIDADE
@@ -647,7 +674,7 @@ def gerar_imagem(
         (W - largura_v - 50, y_topo_rodape - 25),
         texto_v,
         fill=(160, 160, 160),
-        font=fonte_v
+        font=fonte_v,
     )
 
     # RODAPÉ
@@ -663,7 +690,7 @@ def gerar_imagem(
             (45, y_topo_rodape + 15 + (i * 22)),
             aviso,
             fill=cor_marrom_logo,
-            font=carregar_fonte(15)
+            font=carregar_fonte(15),
         )
 
     y_linha = y_topo_rodape + 85
@@ -679,7 +706,7 @@ def gerar_imagem(
         (pos_x_contatos, y_linha + 12),
         contatos,
         fill=cor_marrom_logo,
-        font=fonte_contatos
+        font=fonte_contatos,
     )
 
     buffer = io.BytesIO()
@@ -735,11 +762,15 @@ if dados_produto["tipo"] == "unitario":
     c1, c2, c3, c4 = st.columns([3, 1, 1.3, 1])
 
     with c1:
-        st.text_input("Tipo de cobrança", value="Por unidade", disabled=True, key="tipo_unitario")
+        st.text_input(
+            "Tipo de cobrança", value="Por unidade", disabled=True, key="tipo_unitario"
+        )
     with c2:
         qtd_unit = st.number_input("Qtd", min_value=1, value=50, step=1)
     with c3:
-        desconto_novo_item = st.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2", key="desc_item_unit")
+        desconto_novo_item = st.text_input(
+            "Desconto Item", placeholder="Ex.: 10% ou R$2", key="desc_item_unit"
+        )
     with c4:
         st.write(" ")
         if st.button("➕ Adicionar produto"):
@@ -764,7 +795,7 @@ else:
             "Tipo de cobrança",
             value=f"Por peso ({formatar_real(dados_produto['preco_kg'])}/kg)",
             disabled=True,
-            key="tipo_kg"
+            key="tipo_kg",
         )
     with c2:
         unidade_peso = st.selectbox("Unidade", ["kg", "g"], key="unidade_nova")
@@ -776,20 +807,18 @@ else:
                 value=1.0,
                 step=0.1,
                 format="%.3f",
-                key="peso_novo_kg"
+                key="peso_novo_kg",
             )
             gramas_item = int(round(valor_peso * 1000))
         else:
             valor_peso = st.number_input(
-                "Quantidade",
-                min_value=100,
-                value=1000,
-                step=50,
-                key="peso_novo_g"
+                "Quantidade", min_value=100, value=1000, step=50, key="peso_novo_g"
             )
             gramas_item = int(valor_peso)
     with c4:
-        desconto_novo_item = st.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2", key="desc_kg_novo")
+        desconto_novo_item = st.text_input(
+            "Desconto Item", placeholder="Ex.: 10% ou R$2", key="desc_kg_novo"
+        )
     with c5:
         st.write(" ")
         if st.button("➕ Adicionar produto em massa"):
@@ -815,7 +844,7 @@ with e1:
     emb_pedido_desc = st.text_input(
         "Descrição da embalagem do pedido",
         value=st.session_state.embalagem_pedido["descricao"],
-        placeholder="Ex.: Pote premium / Caixa especial"
+        placeholder="Ex.: Pote premium / Caixa especial",
     )
 with e2:
     emb_pedido_valor = st.number_input(
@@ -823,7 +852,7 @@ with e2:
         min_value=0.0,
         value=float(st.session_state.embalagem_pedido["valor"]),
         step=0.5,
-        format="%.2f"
+        format="%.2f",
     )
 with e3:
     st.write(" ")
@@ -839,11 +868,22 @@ st.divider()
 st.subheader("Embalagens especiais/unitárias (opcional)")
 ee1, ee2, ee3, ee4 = st.columns([2.5, 1, 1.2, 1])
 with ee1:
-    emb_esp_desc = st.text_input("Descrição", placeholder="Ex.: Caixa premium / Pote individual", key="emb_esp_desc")
+    emb_esp_desc = st.text_input(
+        "Descrição", placeholder="Ex.: Caixa premium / Pote individual", key="emb_esp_desc"
+    )
 with ee2:
-    emb_esp_qtd = st.number_input("Qtd", min_value=1, value=1, step=1, key="emb_esp_qtd")
+    emb_esp_qtd = st.number_input(
+        "Qtd", min_value=1, value=1, step=1, key="emb_esp_qtd"
+    )
 with ee3:
-    emb_esp_valor = st.number_input("Valor unit.", min_value=0.0, value=0.0, step=0.5, format="%.2f", key="emb_esp_valor")
+    emb_esp_valor = st.number_input(
+        "Valor unit.",
+        min_value=0.0,
+        value=0.0,
+        step=0.5,
+        format="%.2f",
+        key="emb_esp_valor",
+    )
 with ee4:
     st.write(" ")
     if st.button("➕ Adicionar embalagem especial"):
@@ -872,9 +912,20 @@ st.divider()
 st.subheader("Adicionais (opcional)")
 a1, a2, a3 = st.columns([3, 1.2, 1])
 with a1:
-    adicional_desc = st.text_input("Descrição do adicional", placeholder="Ex.: Caixa extra / Taxa de entrega", key="adicional_desc")
+    adicional_desc = st.text_input(
+        "Descrição do adicional",
+        placeholder="Ex.: Caixa extra / Taxa de entrega",
+        key="adicional_desc",
+    )
 with a2:
-    adicional_valor = st.number_input("Valor do adicional", min_value=0.0, value=0.0, step=0.5, format="%.2f", key="adicional_valor")
+    adicional_valor = st.number_input(
+        "Valor do adicional",
+        min_value=0.0,
+        value=0.0,
+        step=0.5,
+        format="%.2f",
+        key="adicional_valor",
+    )
 with a3:
     st.write(" ")
     if st.button("➕ Adicionar adicional"):
@@ -902,7 +953,7 @@ st.subheader("Observação (opcional)")
 observacao = st.text_area(
     "Observação do orçamento",
     value=st.session_state.observacao,
-    placeholder="Ex.: Produto enviado em embalagem especial para consumo de colher."
+    placeholder="Ex.: Produto enviado em embalagem especial para consumo de colher.",
 )
 st.session_state.observacao = observacao
 
@@ -912,7 +963,7 @@ st.subheader("Desconto geral do pedido")
 desconto_geral = st.text_input(
     "Desconto Geral",
     value=st.session_state.desconto_geral,
-    placeholder="Ex.: 10% ou R$20"
+    placeholder="Ex.: 10% ou R$20",
 )
 st.session_state.desconto_geral = desconto_geral
 
@@ -936,7 +987,9 @@ if tem_conteudo:
     total_gramas_preview = 0
 
     for i, item in enumerate(st.session_state.carrinho):
-        subtotal_bruto, desconto_item_valor, _, subtotal_final = calcular_subtotal_item(item)
+        subtotal_bruto, desconto_item_valor, _, subtotal_final = (
+            calcular_subtotal_item(item)
+        )
 
         total_bruto_preview_itens += subtotal_bruto
         total_desc_itens_preview += desconto_item_valor
@@ -989,7 +1042,9 @@ if tem_conteudo:
         else:
             total_gramas_preview += item["gramas"]
 
-            col_prod, col_unid, col_qtd, col_desc, col_bt = st.columns([2.4, 1, 1.2, 1.4, 0.5])
+            col_prod, col_unid, col_qtd, col_desc, col_bt = st.columns(
+                [2.4, 1, 1.2, 1.4, 0.5]
+            )
 
             col_prod.write(
                 f"**{item['produto']}**  \n"
@@ -1052,8 +1107,12 @@ if tem_conteudo:
                 st.session_state.carrinho.pop(i)
                 st.rerun()
 
-    total_emb_pedido_preview = calcular_total_embalagens_pedido(st.session_state.embalagem_pedido)
-    total_emb_especiais_preview = calcular_total_embalagens_especiais(st.session_state.embalagens_especiais)
+    total_emb_pedido_preview = calcular_total_embalagens_pedido(
+        st.session_state.embalagem_pedido
+    )
+    total_emb_especiais_preview = calcular_total_embalagens_especiais(
+        st.session_state.embalagens_especiais
+    )
     total_adicionais_preview = calcular_total_adicionais(st.session_state.adicionais)
 
     total_bruto_preview = (
@@ -1082,7 +1141,9 @@ if tem_conteudo:
         st.write(f"**Embalagem do pedido:** {formatar_real(total_emb_pedido_preview)}")
 
     if total_emb_especiais_preview > 0:
-        st.write(f"**Embalagens especiais:** {formatar_real(total_emb_especiais_preview)}")
+        st.write(
+            f"**Embalagens especiais:** {formatar_real(total_emb_especiais_preview)}"
+        )
 
     if total_adicionais_preview > 0:
         st.write(f"**Adicionais:** {formatar_real(total_adicionais_preview)}")
@@ -1121,7 +1182,7 @@ if tem_conteudo:
                     embalagem_pedido=st.session_state.embalagem_pedido,
                     embalagens_especiais=st.session_state.embalagens_especiais,
                     adicionais=st.session_state.adicionais,
-                    observacao=st.session_state.observacao
+                    observacao=st.session_state.observacao,
                 )
                 st.image(res)
 
