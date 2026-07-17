@@ -110,41 +110,16 @@ def carregar_historico_supabase():
 
 def salvar_orcamento_supabase(novo_registro):
     try:
-        # 1. Tratamento do desconto_geral (Caso ele venha como dicionário ou string JSON)
-        desconto = novo_registro.get("desconto_geral")
-        
-        if isinstance(desconto, dict):
-            # Se for um dicionário Python, extrai apenas o número do valor
-            novo_registro["desconto_geral"] = float(desconto.get("valor", 0.0))
-            
-        elif isinstance(desconto, str):
-            if desconto == "" or desconto.strip() == "":
-                novo_registro["desconto_geral"] = 0.0
-            elif "valor" in desconto:
-                # Se por acaso vier como texto estruturado, decodifica e pega o valor
-                try:
-                    import json
-                    dados_desc = json.loads(desconto)
-                    novo_registro["desconto_geral"] = float(dados_desc.get("valor", 0.0))
-                except:
-                    novo_registro["desconto_geral"] = 0.0
-
-        # 2. Higienização do campo total (Garante que seja um número válido)
-        if novo_registro.get("total") == "":
+        # Mantemos apenas a trava de segurança para o total do pedido
+        if novo_registro.get("total") == "" or novo_registro.get("total") is None:
             novo_registro["total"] = 0.0
-        else:
-            try:
-                novo_registro["total"] = float(novo_registro["total"])
-            except:
-                pass
 
-        # Envia os dados perfeitamente limpos para o banco
+        # Agora o desconto vai passar como objeto e o banco vai aceitar sorrindo
         supabase.table("orcamentos").insert(novo_registro).execute()
         return True
     except Exception as e:
         st.error(f"Erro ao salvar no Supabase: {e}")
         return False
-
 
 CATALOGO = {
     "Brigadeiro de Chocolate": {"tipo": "unitario", "preco_cento": 125.00},
