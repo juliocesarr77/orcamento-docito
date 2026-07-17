@@ -109,12 +109,43 @@ def carregar_historico_supabase():
 
 
 def salvar_orcamento_supabase(novo_registro):
+    import json
     try:
-        # Mantemos apenas a trava de segurança para o total do pedido
+        # 1. SOLUÇÃO DEFINITIVA: Força o desconto a virar um número puro (numeric)
+        desconto = novo_registro.get("desconto_geral")
+        valor_final_desconto = 0.0
+
+        if isinstance(desconto, dict):
+            # Se vier como dicionário Python nativo
+            valor_final_desconto = float(desconto.get("valor", 0.0))
+        elif isinstance(desconto, str):
+            desconto_limpo = desconto.strip()
+            if desconto_limpo:
+                try:
+                    # Se vier como o texto/string '{"descricao":"","valor":0.0}'
+                    dados_json = json.loads(desconto_limpo)
+                    if isinstance(dados_json, dict):
+                        valor_final_desconto = float(dados_json.get("valor", 0.0))
+                except json.JSONDecodeError:
+                    try:
+                        # Se vier como uma string de número comum, tipo '15.50'
+                        valor_final_desconto = float(desconto_limpo)
+                    except ValueError:
+                        valor_final_desconto = 0.0
+
+        # Substitui a estrutura complexa pelo número limpo que o Supabase exige
+        novo_registro["desconto_geral"] = valor_final_desconto
+
+        # 2. Garantia de segurança para o total do pedido
         if novo_registro.get("total") == "" or novo_registro.get("total") is None:
             novo_registro["total"] = 0.0
+        else:
+            try:
+                novo_registro["total"] = float(novo_registro["total"])
+            except:
+                novo_registro["total"] = 0.0
 
-        # Agora o desconto vai passar como objeto e o banco vai aceitar sorrindo
+        # Envia os dados limpos de uma vez por todas
         supabase.table("orcamentos").insert(novo_registro).execute()
         return True
     except Exception as e:
