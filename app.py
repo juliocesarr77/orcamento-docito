@@ -6,6 +6,7 @@ import pytz
 from pathlib import Path
 import base64
 import json
+import math
 from supabase import create_client, Client
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -291,11 +292,141 @@ CATALOGO = {
 }
 
 
+# --- REGRAS DE PREÇO POR QUANTIDADE ---
+# A lógica abaixo cria um desconto progressivo por quantidade e deixa
+# 80/90 unidades propositalmente próximas do valor do cento para incentivar
+# a cliente a levar 100 unidades.
+REGRAS_PRECO_DOCES = {
+    125.00: {
+        "unitario_ate_49": 1.50,
+        50: 68.90,
+        80: 112.90,
+        90: 118.90,
+        100: 125.00,
+    },
+    130.00: {
+        "unitario_ate_49": 1.50,
+        50: 71.90,
+        80: 117.90,
+        90: 123.90,
+        100: 130.00,
+    },
+    150.00: {
+        "unitario_ate_49": 2.00,
+        50: 82.90,
+        80: 135.90,
+        90: 142.90,
+        100: 150.00,
+    },
+    160.00: {
+        "unitario_ate_49": 2.00,
+        50: 85.00,
+        80: 144.90,
+        90: 152.90,
+        100: 160.00,
+    },
+}
+
+
+def arredondar_para_90(valor):
+    """
+    Arredonda para o próximo preço terminado em ,90.
+
+    Exemplos:
+    68,75 -> 68,90
+    71,50 -> 71,90
+    82,50 -> 82,90
+
+    O pequeno epsilon evita que um número que já termina em ,90
+    avance por erro de ponto flutuante.
+    """
+    return round(math.ceil((float(valor) - 0.90) - 1e-9) + 0.90, 2)
+
+
+def interpolar_preco(qtd, qtd_inicial, valor_inicial, qtd_final, valor_final):
+    """Calcula o preço progressivamente entre duas faixas."""
+    proporcao = (qtd - qtd_inicial) / (qtd_final - qtd_inicial)
+    valor = valor_inicial + ((valor_final - valor_inicial) * proporcao)
+    return arredondar_para_90(valor)
+
+
+def calcular_preco_doces(preco_cento, qtd):
+    """
+    Calcula o preço dos doces conforme a quantidade.
+
+    Regras:
+    - 1 a 49 unidades:
+      * cento de R$ 125/R$ 130 -> R$ 1,50 por unidade
+      * cento de R$ 150/R$ 160 -> R$ 2,00 por unidade
+    - 50 unidades: preço promocional fixo por faixa
+    - 51 a 79: progressão entre os valores de 50 e 80
+    - 80 unidades: preço fixo por faixa
+    - 81 a 89: progressão entre os valores de 80 e 90
+    - 90 unidades: preço fixo por faixa
+    - 91 a 99: progressão entre os valores de 90 e 100
+    - 100 ou mais: cálculo normal pelo valor do cento
+    """
+    preco_cento = round(float(preco_cento), 2)
+    qtd = int(qtd)
+
+    regra = REGRAS_PRECO_DOCES.get(preco_cento)
+
+    # Segurança para algum produto futuro com valor de cento ainda não cadastrado
+    # nas faixas acima: mantém o cálculo proporcional tradicional.
+    if regra is None:
+        return round((preco_cento / 100) * qtd, 2)
+
+    # Pedido pequeno: cobrança por unidade.
+    if qtd < 50:
+        return round(float(regra["unitario_ate_49"]) * qtd, 2)
+
+    # Valores-âncora exatos.
+    if qtd in (50, 80, 90):
+        return float(regra[qtd])
+
+    # 51 a 79 unidades.
+    if qtd < 80:
+        return interpolar_preco(
+            qtd,
+            50,
+            float(regra[50]),
+            80,
+            float(regra[80]),
+        )
+
+    # 81 a 89 unidades.
+    if qtd < 90:
+        return interpolar_preco(
+            qtd,
+            80,
+            float(regra[80]),
+            90,
+            float(regra[90]),
+        )
+
+    # 91 a 99 unidades.
+    if qtd < 100:
+        return interpolar_preco(
+            qtd,
+            90,
+            float(regra[90]),
+            100,
+            float(regra[100]),
+        )
+
+    # A partir de 100, volta ao cálculo normal pelo valor do cento.
+    return round((preco_cento / 100) * qtd, 2)
+
+
 def calcular_subtotal_item(item):
     if item["tipo"] == "unitario":
-        subtotal_bruto = (item["preco_cento"] / 100) * item["qtd"]
+        subtotal_bruto = calcular_preco_doces(
+            item["preco_cento"],
+            item["qtd"],
+        )
     else:
         subtotal_bruto = (item["preco_kg"] / 1000) * item["gramas"]
+
     desconto_item_valor, desconto_item_desc = calcular_desconto(
         subtotal_bruto, item.get("desconto", "")
     )
