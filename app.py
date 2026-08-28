@@ -7,6 +7,8 @@ from pathlib import Path
 import base64
 import json
 import math
+
+# VERSAO_PRECOS_PROGRESSIVOS_V7 - 2026-08-28
 from supabase import create_client, Client
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -282,7 +284,7 @@ CATALOGO = {
     "Olho de Sogra": {"tipo": "unitario", "preco_cento": 150.00},
     "Oreo": {"tipo": "unitario", "preco_cento": 150.00},
     "Ninho Temático": {"tipo": "unitario", "preco_cento": 160.00},
-    "Aplique": {"tipo": "unitario", "preco_cento": 150.00},
+    "Aplique": {"tipo": "unitario", "preco_cento": 150.00, "preco_unitario": 1.50, "conta_como_doce": False},
     "Brigadeiro de Chocolate em massa": {"tipo": "kg", "preco_kg": 84.90},
     "Brigadeiro de Chocolate Branco": {"tipo": "unitario", "preco_cento": 150.00},
     "Brigadeiro de Ninho com Rosetas Coloridas e Apliques de Pasta Americana": {
@@ -293,137 +295,211 @@ CATALOGO = {
 
 
 # --- REGRAS DE PREÇO POR QUANTIDADE ---
-# A lógica abaixo cria um desconto progressivo por quantidade e deixa
-# 80/90 unidades propositalmente próximas do valor do cento para incentivar
-# a cliente a levar 100 unidades.
+#
+# A faixa de preço é definida pela QUANTIDADE TOTAL DE DOCES do pedido,
+# independentemente de quantos sabores foram escolhidos.
+#
+# Exemplo:
+# 50 Brigadeiros + 50 Ninhos = 100 doces.
+# Os dois sabores passam a usar o valor unitário da faixa de 100 doces.
+#
+# O Aplique NÃO entra na quantidade total de doces e permanece sempre
+# em R$ 1,50 por unidade.
+#
+# Objetivo comercial da tabela:
+# - até 25 doces: preço unitário cheio;
+# - de 26 a 49: desconto progressivo, mas ainda com valor mais alto para
+#   tornar pedidos a partir de 50 mais atrativos;
+# - de 50 a 100: o valor UNITÁRIO diminui progressivamente conforme a
+#   quantidade aumenta;
+# - 90 unidades ficam próximas do cento para incentivar 100 unidades;
+# - a partir de 100: preço normal proporcional ao valor do cento.
 REGRAS_PRECO_DOCES = {
     125.00: {
-        "unitario_ate_49": 1.50,
+        "unitario_ate_25": 1.50,
+        40: 58.90,
         50: 68.90,
-        80: 112.90,
-        90: 118.90,
+        75: 98.90,
+        90: 116.90,
         100: 125.00,
     },
     130.00: {
-        "unitario_ate_49": 1.50,
+        "unitario_ate_25": 1.50,
+        40: 59.90,
         50: 71.90,
-        80: 117.90,
+        75: 104.90,
         90: 123.90,
         100: 130.00,
     },
     150.00: {
-        "unitario_ate_49": 2.00,
+        "unitario_ate_25": 2.00,
+        40: 77.90,
         50: 82.90,
-        80: 135.90,
-        90: 142.90,
+        75: 117.90,
+        90: 140.90,
         100: 150.00,
     },
     160.00: {
-        "unitario_ate_49": 2.00,
+        "unitario_ate_25": 2.00,
+        40: 78.90,
         50: 85.00,
-        80: 144.90,
-        90: 152.90,
+        75: 124.90,
+        90: 148.90,
         100: 160.00,
     },
 }
 
 
-def arredondar_para_90(valor):
+def interpolar(valor_inicial, valor_final, posicao):
+    """Interpolação linear entre dois valores. posicao deve ficar entre 0 e 1."""
+    return valor_inicial + ((valor_final - valor_inicial) * posicao)
+
+
+def calcular_valor_unitario_doces(preco_cento, quantidade_total_doces):
     """
-    Arredonda para o próximo preço terminado em ,90.
+    Retorna o valor UNITÁRIO efetivo de um doce com base na quantidade
+    TOTAL de doces do pedido.
 
-    Exemplos:
-    68,75 -> 68,90
-    71,50 -> 71,90
-    82,50 -> 82,90
+    A quantidade total do pedido define a faixa para todos os sabores.
+    O cálculo é interpolado sobre o valor unitário, garantindo que o
+    valor por unidade nunca aumente quando a quantidade aumenta.
 
-    O pequeno epsilon evita que um número que já termina em ,90
-    avance por erro de ponto flutuante.
+    Regras comerciais:
+    - 1 a 25: preço unitário cheio;
+    - 26 a 40: desconto leve (faixa ainda mais puxada);
+    - 41 a 50: aproxima do pacote mínimo desejado de 50 unidades;
+    - 51 a 75: desconto progressivo;
+    - 76 a 90: desconto progressivo;
+    - 91 a 99: aproxima do cento;
+    - 100+: valor normal proporcional do cento.
     """
-    return round(math.ceil((float(valor) - 0.90) - 1e-9) + 0.90, 2)
+    preco_cento = round(float(preco_cento), 2)
+    qtd = max(int(quantidade_total_doces), 1)
 
+    regra = REGRAS_PRECO_DOCES.get(preco_cento)
 
-def interpolar_preco(qtd, qtd_inicial, valor_inicial, qtd_final, valor_final):
-    """Calcula o preço progressivamente entre duas faixas."""
-    proporcao = (qtd - qtd_inicial) / (qtd_final - qtd_inicial)
-    valor = valor_inicial + ((valor_final - valor_inicial) * proporcao)
-    return arredondar_para_90(valor)
+    # Produto futuro ainda não configurado: cálculo proporcional padrão.
+    if regra is None:
+        return preco_cento / 100
+
+    unitario_25 = float(regra["unitario_ate_25"])
+
+    # Até 25 unidades: preço cheio por unidade.
+    if qtd <= 25:
+        return unitario_25
+
+    # A partir de 100: preço normal do cento.
+    if qtd >= 100:
+        return preco_cento / 100
+
+    # Converte as âncoras de preço total em preço unitário.
+    unitario_40 = float(regra[40]) / 40
+    unitario_50 = float(regra[50]) / 50
+    unitario_75 = float(regra[75]) / 75
+    unitario_90 = float(regra[90]) / 90
+    unitario_100 = float(regra[100]) / 100
+
+    # 26 a 40: desconto bem leve para manter pedido pequeno mais puxado.
+    if qtd <= 40:
+        posicao = (qtd - 25) / (40 - 25)
+        return interpolar(unitario_25, unitario_40, posicao)
+
+    # 41 a 50: começa a ficar mais vantajoso para chegar no mínimo de 50.
+    if qtd <= 50:
+        posicao = (qtd - 40) / (50 - 40)
+        return interpolar(unitario_40, unitario_50, posicao)
+
+    # 51 a 75: valor unitário continua caindo.
+    if qtd <= 75:
+        posicao = (qtd - 50) / (75 - 50)
+        return interpolar(unitario_50, unitario_75, posicao)
+
+    # 76 a 90.
+    if qtd <= 90:
+        posicao = (qtd - 75) / (90 - 75)
+        return interpolar(unitario_75, unitario_90, posicao)
+
+    # 91 a 99: aproxima do valor do cento para incentivar 100 unidades.
+    posicao = (qtd - 90) / (100 - 90)
+    return interpolar(unitario_90, unitario_100, posicao)
 
 
 def calcular_preco_doces(preco_cento, qtd):
     """
-    Calcula o preço dos doces conforme a quantidade.
+    Calcula quanto custaria um pedido inteiro de um único preço de cento
+    na quantidade informada.
 
-    Regras:
-    - 1 a 49 unidades:
-      * cento de R$ 125/R$ 130 -> R$ 1,50 por unidade
-      * cento de R$ 150/R$ 160 -> R$ 2,00 por unidade
-    - 50 unidades: preço promocional fixo por faixa
-    - 51 a 79: progressão entre os valores de 50 e 80
-    - 80 unidades: preço fixo por faixa
-    - 81 a 89: progressão entre os valores de 80 e 90
-    - 90 unidades: preço fixo por faixa
-    - 91 a 99: progressão entre os valores de 90 e 100
-    - 100 ou mais: cálculo normal pelo valor do cento
+    Esta função usa a mesma regra unitária progressiva aplicada nos pedidos
+    com vários sabores.
     """
-    preco_cento = round(float(preco_cento), 2)
-    qtd = int(qtd)
-
-    regra = REGRAS_PRECO_DOCES.get(preco_cento)
-
-    # Segurança para algum produto futuro com valor de cento ainda não cadastrado
-    # nas faixas acima: mantém o cálculo proporcional tradicional.
-    if regra is None:
-        return round((preco_cento / 100) * qtd, 2)
-
-    # Pedido pequeno: cobrança por unidade.
-    if qtd < 50:
-        return round(float(regra["unitario_ate_49"]) * qtd, 2)
-
-    # Valores-âncora exatos.
-    if qtd in (50, 80, 90):
-        return float(regra[qtd])
-
-    # 51 a 79 unidades.
-    if qtd < 80:
-        return interpolar_preco(
-            qtd,
-            50,
-            float(regra[50]),
-            80,
-            float(regra[80]),
-        )
-
-    # 81 a 89 unidades.
-    if qtd < 90:
-        return interpolar_preco(
-            qtd,
-            80,
-            float(regra[80]),
-            90,
-            float(regra[90]),
-        )
-
-    # 91 a 99 unidades.
-    if qtd < 100:
-        return interpolar_preco(
-            qtd,
-            90,
-            float(regra[90]),
-            100,
-            float(regra[100]),
-        )
-
-    # A partir de 100, volta ao cálculo normal pelo valor do cento.
-    return round((preco_cento / 100) * qtd, 2)
+    qtd = max(int(qtd), 1)
+    valor_unitario = calcular_valor_unitario_doces(preco_cento, qtd)
+    return round(valor_unitario * qtd, 2)
 
 
-def calcular_subtotal_item(item):
+def item_eh_aplique(item):
+    """
+    Identifica o Aplique com compatibilidade para itens novos e antigos.
+
+    Nos itens novos, usamos a flag conta_como_doce=False.
+    Nos orçamentos antigos, em que essa flag não existe, o nome "Aplique"
+    continua sendo reconhecido automaticamente.
+    """
+    if item.get("conta_como_doce") is False:
+        return True
+    return str(item.get("produto", "")).strip().casefold() == "aplique"
+
+
+def calcular_total_doces_pedido(itens):
+    """
+    Soma somente os doces reais do pedido para definir a faixa de preço.
+
+    Exemplos:
+    - 50 Brigadeiros + 50 Ninhos = 100 doces.
+    - 100 Ninhos + 100 Apliques = 100 doces.
+
+    Aplique e itens vendidos por peso não entram nessa quantidade.
+    """
+    total = 0
+    for item in itens:
+        if item.get("tipo") == "unitario" and not item_eh_aplique(item):
+            total += int(item.get("qtd", 0))
+    return total
+
+
+def calcular_subtotal_item(item, quantidade_total_doces=None):
+    """
+    Calcula o subtotal de um item usando a quantidade TOTAL de doces do pedido.
+
+    Exemplo:
+    - 50 Brigadeiros + 50 Ninhos = 100 doces no pedido.
+      Ambos são cobrados na faixa de 100 unidades, sem acréscimo de pedido menor.
+
+    Regras especiais:
+    - Aplique: sempre R$ 1,50 por unidade e não interfere na faixa dos doces.
+    - Itens por kg: continuam com o cálculo normal por peso.
+    """
     if item["tipo"] == "unitario":
-        subtotal_bruto = calcular_preco_doces(
-            item["preco_cento"],
-            item["qtd"],
-        )
+        qtd_item = int(item["qtd"])
+
+        # Aplique é sempre cobrado a R$ 1,50 por unidade.
+        if item_eh_aplique(item):
+            subtotal_bruto = float(item.get("preco_unitario") or 1.50) * qtd_item
+        else:
+            # Compatibilidade: se a função for chamada isoladamente,
+            # usa a própria quantidade do item como quantidade total.
+            total_doces = int(quantidade_total_doces or qtd_item)
+            total_doces = max(total_doces, 1)
+
+            # A quantidade TOTAL do pedido define o valor unitário efetivo.
+            # Assim, misturar sabores mantém a mesma faixa comercial.
+            valor_unitario_efetivo = calcular_valor_unitario_doces(
+                item["preco_cento"],
+                total_doces,
+            )
+            subtotal_bruto = valor_unitario_efetivo * qtd_item
+
+        subtotal_bruto = round(subtotal_bruto, 2)
     else:
         subtotal_bruto = (item["preco_kg"] / 1000) * item["gramas"]
 
@@ -525,9 +601,13 @@ def gerar_imagem(
         extra = 24 if tem_detalhe else 0
         return max(espaco_linha, len(linhas) * altura_linha + extra + 8)
 
+    quantidade_total_doces = calcular_total_doces_pedido(itens)
+
     total_altura_itens = 0
     for item in itens:
-        _, _, desconto_item_desc, _ = calcular_subtotal_item(item)
+        _, _, desconto_item_desc, _ = calcular_subtotal_item(
+            item, quantidade_total_doces
+        )
         texto_prev = gerar_texto_item(item)
         if desconto_item_desc:
             texto_prev += f" (-{desconto_item_desc})"
@@ -614,7 +694,7 @@ def gerar_imagem(
     y_itens = y_itens_inicio
     total_bruto_itens = 0
     total_desconto_itens = 0
-    total_doces = 0
+    total_doces = quantidade_total_doces
     total_gramas = 0
     fonte_item = carregar_fonte(tam_fonte_item)
 
@@ -666,13 +746,11 @@ def gerar_imagem(
             desconto_item_valor,
             desconto_item_desc,
             subtotal_final,
-        ) = calcular_subtotal_item(item)
+        ) = calcular_subtotal_item(item, quantidade_total_doces)
         total_bruto_itens += subtotal_bruto
         total_desconto_itens += desconto_item_valor
 
-        if item["tipo"] == "unitario":
-            total_doces += item["qtd"]
-        else:
+        if item["tipo"] != "unitario":
             total_gramas += item["gramas"]
 
         texto_item = gerar_texto_item(item)
@@ -970,6 +1048,7 @@ except Exception:
     st.title("🍰 DOCITO DOCERIA")
 
 st.title("Gerador de Orçamentos")
+st.caption("Motor de preços V7 ativo")
 
 opcoes_paginas = [
     "✍️ Criar Novo Orçamento",
@@ -1128,6 +1207,8 @@ if st.session_state.pagina_ativa == "✍️ Criar Novo Orçamento":
                     "tipo": "unitario",
                     "qtd": int(qtd_unit),
                     "preco_cento": dados_produto["preco_cento"],
+                    "preco_unitario": dados_produto.get("preco_unitario"),
+                    "conta_como_doce": dados_produto.get("conta_como_doce", True),
                     "desconto": desconto_novo_item.strip(),
                 })
                 st.rerun()
@@ -1251,19 +1332,21 @@ if st.session_state.pagina_ativa == "✍️ Criar Novo Orçamento":
 
     if tem_conteudo:
         st.subheader("🛒 Itens Selecionados")
+        st.caption("✅ Tabela progressiva V7 ativa — faixa calculada pelo total de doces do pedido")
         total_bruto_preview_itens = 0
         total_desc_itens_preview = 0
-        total_doces_preview = 0
+        total_doces_preview = calcular_total_doces_pedido(st.session_state.carrinho)
         total_gramas_preview = 0
 
         for i, item in enumerate(st.session_state.carrinho):
-            subtotal_bruto, desconto_item_valor, _, subtotal_final = calcular_subtotal_item(item)
+            subtotal_bruto, desconto_item_valor, _, subtotal_final = calcular_subtotal_item(
+                item, total_doces_preview
+            )
             total_bruto_preview_itens += subtotal_bruto
             total_desc_itens_preview += desconto_item_valor
             item_id = item.get("id", f"fallback_{i}")
 
             if item["tipo"] == "unitario":
-                total_doces_preview += item["qtd"]
                 col_prod, col_qtd, col_desc, col_bt = st.columns([3, 1, 1.4, 0.5])
                 col_prod.write(f"**{item['produto']}**  \n{item['qtd']}un | {formatar_real(subtotal_bruto)} → **{formatar_real(subtotal_final)}**")
                 nova_qtd = col_qtd.number_input("Qtd", min_value=1, value=int(item["qtd"]), key=f"edit_qtd_{item_id}", label_visibility="collapsed")
