@@ -7,6 +7,8 @@ from pathlib import Path
 import base64
 import json
 import math
+
+# VERSAO_PRECOS_TOTAL_DOCES_V4 - 2026-08-28
 from supabase import create_client, Client
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -282,7 +284,7 @@ CATALOGO = {
     "Olho de Sogra": {"tipo": "unitario", "preco_cento": 150.00},
     "Oreo": {"tipo": "unitario", "preco_cento": 150.00},
     "Ninho Temático": {"tipo": "unitario", "preco_cento": 160.00},
-    "Aplique": {"tipo": "unitario", "preco_cento": 150.00},
+    "Aplique": {"tipo": "unitario", "preco_cento": 150.00, "preco_unitario": 1.50, "conta_como_doce": False},
     "Brigadeiro de Chocolate em massa": {"tipo": "kg", "preco_kg": 84.90},
     "Brigadeiro de Chocolate Branco": {"tipo": "unitario", "preco_cento": 150.00},
     "Brigadeiro de Ninho com Rosetas Coloridas e Apliques de Pasta Americana": {
@@ -418,12 +420,74 @@ def calcular_preco_doces(preco_cento, qtd):
     return round((preco_cento / 100) * qtd, 2)
 
 
-def calcular_subtotal_item(item):
+def item_eh_aplique(item):
+    """
+    Identifica o Aplique com compatibilidade para itens novos e antigos.
+
+    Nos itens novos, usamos a flag conta_como_doce=False.
+    Nos orçamentos antigos, em que essa flag não existe, o nome "Aplique"
+    continua sendo reconhecido automaticamente.
+    """
+    if item.get("conta_como_doce") is False:
+        return True
+    return str(item.get("produto", "")).strip().casefold() == "aplique"
+
+
+def calcular_total_doces_pedido(itens):
+    """
+    Soma somente os doces reais do pedido para definir a faixa de preço.
+
+    Exemplos:
+    - 50 Brigadeiros + 50 Ninhos = 100 doces.
+    - 100 Ninhos + 100 Apliques = 100 doces.
+
+    Aplique e itens vendidos por peso não entram nessa quantidade.
+    """
+    total = 0
+    for item in itens:
+        if item.get("tipo") == "unitario" and not item_eh_aplique(item):
+            total += int(item.get("qtd", 0))
+    return total
+
+
+def calcular_subtotal_item(item, quantidade_total_doces=None):
+    """
+    Calcula o subtotal de um item usando a quantidade TOTAL de doces do pedido.
+
+    Exemplo:
+    - 50 Brigadeiros + 50 Ninhos = 100 doces no pedido.
+      Ambos são cobrados na faixa de 100 unidades, sem acréscimo de pedido menor.
+
+    Regras especiais:
+    - Aplique: sempre R$ 1,50 por unidade e não interfere na faixa dos doces.
+    - Itens por kg: continuam com o cálculo normal por peso.
+    """
     if item["tipo"] == "unitario":
-        subtotal_bruto = calcular_preco_doces(
-            item["preco_cento"],
-            item["qtd"],
-        )
+        qtd_item = int(item["qtd"])
+
+        # Aplique é sempre cobrado a R$ 1,50 por unidade.
+        if item_eh_aplique(item):
+            subtotal_bruto = float(item.get("preco_unitario") or 1.50) * qtd_item
+        else:
+            # Compatibilidade: se a função for chamada isoladamente,
+            # usa a própria quantidade do item como quantidade total.
+            total_doces = int(quantidade_total_doces or qtd_item)
+            total_doces = max(total_doces, 1)
+
+            # Primeiro calcula quanto custaria uma encomenda inteira dessa
+            # faixa/preço de cento com a quantidade TOTAL do pedido.
+            valor_referencia_total = calcular_preco_doces(
+                item["preco_cento"],
+                total_doces,
+            )
+
+            # Depois transforma em valor efetivo por unidade e aplica somente
+            # à quantidade deste sabor. Isso permite misturar sabores sem
+            # perder o benefício da quantidade total do pedido.
+            valor_unitario_efetivo = valor_referencia_total / total_doces
+            subtotal_bruto = valor_unitario_efetivo * qtd_item
+
+        subtotal_bruto = round(subtotal_bruto, 2)
     else:
         subtotal_bruto = (item["preco_kg"] / 1000) * item["gramas"]
 
@@ -525,9 +589,13 @@ def gerar_imagem(
         extra = 24 if tem_detalhe else 0
         return max(espaco_linha, len(linhas) * altura_linha + extra + 8)
 
+    quantidade_total_doces = calcular_total_doces_pedido(itens)
+
     total_altura_itens = 0
     for item in itens:
-        _, _, desconto_item_desc, _ = calcular_subtotal_item(item)
+        _, _, desconto_item_desc, _ = calcular_subtotal_item(
+            item, quantidade_total_doces
+        )
         texto_prev = gerar_texto_item(item)
         if desconto_item_desc:
             texto_prev += f" (-{desconto_item_desc})"
@@ -614,7 +682,7 @@ def gerar_imagem(
     y_itens = y_itens_inicio
     total_bruto_itens = 0
     total_desconto_itens = 0
-    total_doces = 0
+    total_doces = quantidade_total_doces
     total_gramas = 0
     fonte_item = carregar_fonte(tam_fonte_item)
 
@@ -666,13 +734,11 @@ def gerar_imagem(
             desconto_item_valor,
             desconto_item_desc,
             subtotal_final,
-        ) = calcular_subtotal_item(item)
+        ) = calcular_subtotal_item(item, quantidade_total_doces)
         total_bruto_itens += subtotal_bruto
         total_desconto_itens += desconto_item_valor
 
-        if item["tipo"] == "unitario":
-            total_doces += item["qtd"]
-        else:
+        if item["tipo"] != "unitario":
             total_gramas += item["gramas"]
 
         texto_item = gerar_texto_item(item)
@@ -1128,6 +1194,8 @@ if st.session_state.pagina_ativa == "✍️ Criar Novo Orçamento":
                     "tipo": "unitario",
                     "qtd": int(qtd_unit),
                     "preco_cento": dados_produto["preco_cento"],
+                    "preco_unitario": dados_produto.get("preco_unitario"),
+                    "conta_como_doce": dados_produto.get("conta_como_doce", True),
                     "desconto": desconto_novo_item.strip(),
                 })
                 st.rerun()
@@ -1253,17 +1321,18 @@ if st.session_state.pagina_ativa == "✍️ Criar Novo Orçamento":
         st.subheader("🛒 Itens Selecionados")
         total_bruto_preview_itens = 0
         total_desc_itens_preview = 0
-        total_doces_preview = 0
+        total_doces_preview = calcular_total_doces_pedido(st.session_state.carrinho)
         total_gramas_preview = 0
 
         for i, item in enumerate(st.session_state.carrinho):
-            subtotal_bruto, desconto_item_valor, _, subtotal_final = calcular_subtotal_item(item)
+            subtotal_bruto, desconto_item_valor, _, subtotal_final = calcular_subtotal_item(
+                item, total_doces_preview
+            )
             total_bruto_preview_itens += subtotal_bruto
             total_desc_itens_preview += desconto_item_valor
             item_id = item.get("id", f"fallback_{i}")
 
             if item["tipo"] == "unitario":
-                total_doces_preview += item["qtd"]
                 col_prod, col_qtd, col_desc, col_bt = st.columns([3, 1, 1.4, 0.5])
                 col_prod.write(f"**{item['produto']}**  \n{item['qtd']}un | {formatar_real(subtotal_bruto)} → **{formatar_real(subtotal_final)}**")
                 nova_qtd = col_qtd.number_input("Qtd", min_value=1, value=int(item["qtd"]), key=f"edit_qtd_{item_id}", label_visibility="collapsed")
