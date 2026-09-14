@@ -1,39 +1,28 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
 import io
 import pytz
-from pathlib import Path
 import base64
-import json
-import math
-
-# VERSAO_PRECOS_PROGRESSIVOS_V7 - 2026-08-28
 from supabase import create_client, Client
 
+# V8: preço do cento personalizável somente para Ninho Temático.
+# Dependências: streamlit, Pillow, pytz, supabase.
+# Mantenha logo.png e as fontes na mesma pasta deste arquivo.
+# Mantenha SUPABASE_URL e SUPABASE_KEY nos Secrets do Streamlit.
 BASE_DIR = Path(__file__).resolve().parent
 
-# --- CONEXÃO COM O SUPABASE ---
-# Certifique-se de adicionar SUPABASE_URL e SUPABASE_KEY nos Secrets do Streamlit Cloud
-try:
-    supabase_url = st.secrets["SUPABASE_URL"]
-    supabase_key = st.secrets["SUPABASE_KEY"]
-    supabase: Client = create_client(supabase_url, supabase_key)
-except Exception as e:
-    st.error(
-        "Erro ao conectar ao Supabase. Confira SUPABASE_URL e SUPABASE_KEY "
-        "nos Secrets do Streamlit."
-    )
-    st.exception(e)
-    st.stop()
 
 def carregar_fonte(tamanho, negrito=False):
-    try:
-        nome_fonte = "DejaVuSans-Bold.ttf" if negrito else "DejaVuSans.ttf"
-        caminho_fonte = BASE_DIR / nome_fonte
-        return ImageFont.truetype(str(caminho_fonte), tamanho)
-    except Exception:
-        return ImageFont.load_default()
+    nome = "DejaVuSans-Bold.ttf" if negrito else "DejaVuSans.ttf"
+    for caminho in (BASE_DIR / nome, nome):
+        try:
+            return ImageFont.truetype(str(caminho), tamanho)
+        except OSError:
+            pass
+    return ImageFont.load_default()
 
 
 def formatar_real(valor):
@@ -42,10 +31,8 @@ def formatar_real(valor):
 
 def formatar_peso(gramas):
     if gramas >= 1000:
-        kg = gramas / 1000
-        if kg.is_integer():
-            return f"{int(kg)}kg"
-        return f"{kg:.3f}kg".replace(".", ",").rstrip("0").rstrip(",")
+        numero = f"{gramas / 1000:.3f}".rstrip("0").rstrip(".")
+        return numero.replace(".", ",") + "kg"
     return f"{int(gramas)}g"
 
 
@@ -56,32 +43,23 @@ def largura_texto(draw, texto, fonte):
 
 def altura_linha_fonte(draw, fonte):
     bbox = draw.textbbox((0, 0), "Ag", font=fonte)
-    return (bbox[3] - bbox[1]) + 7
+    return bbox[3] - bbox[1] + 7
 
 
 def quebrar_texto_largura(draw, texto, fonte, largura_max):
-    texto = str(texto).strip()
-    if not texto:
-        return [""]
-    linhas_finais = []
-
-    for bloco in texto.splitlines():
-        palavras = bloco.split()
-        if not palavras:
-            linhas_finais.append("")
-            continue
-        linha_atual = ""
-        for palavra in palavras:
-            teste = palavra if not linha_atual else f"{linha_atual} {palavra}"
+    linhas = []
+    for bloco in str(texto).strip().splitlines():
+        atual = ""
+        for palavra in bloco.split():
+            teste = f"{atual} {palavra}" if atual else palavra
             if largura_texto(draw, teste, fonte) <= largura_max:
-                linha_atual = teste
+                atual = teste
             else:
-                if linha_atual:
-                    linhas_finais.append(linha_atual)
-                linha_atual = palavra
-        if linha_atual:
-            linhas_finais.append(linha_atual)
-    return linhas_finais or [""]
+                if atual:
+                    linhas.append(atual)
+                atual = palavra
+        linhas.append(atual)
+    return linhas or [""]
 
 
 def calcular_desconto(valor_base, desconto_str):
@@ -90,181 +68,13 @@ def calcular_desconto(valor_base, desconto_str):
     texto = str(desconto_str).strip().lower().replace(" ", "")
     try:
         if "%" in texto:
-            numero = texto.replace("%", "").replace("-", "").replace(",", ".")
-            percentual = float(numero)
-            desconto = valor_base * (percentual / 100)
-            return min(desconto, valor_base), f"{percentual:.0f}%"
-        texto_limpo = (
-            texto.replace("r$", "")
-            .replace("-", "")
-            .replace(".", "")
-            .replace(",", ".")
-        )
-        valor = float(texto_limpo)
-        return min(valor, valor_base), formatar_real(min(valor, valor_base))
-    except Exception:
+            percentual = float(texto.replace("%", "").replace("-", "").replace(",", "."))
+            return min(valor_base * percentual / 100, valor_base), f"{percentual:.0f}%"
+        valor = float(texto.replace("r$", "").replace("-", "").replace(".", "").replace(",", "."))
+        desconto = min(valor, valor_base)
+        return desconto, formatar_real(desconto)
+    except (ValueError, TypeError):
         return 0.0, ""
-
-
-# --- FUNÇÕES DE HISTÓRICO E PERSISTÊNCIA NO SUPABASE ---
-def normalizar_orcamento(registro):
-    """
-    Padroniza registros antigos e novos.
-
-    A tabela possui colunas separadas e também a coluna obrigatória `dados`.
-    Esta função usa primeiro as colunas separadas e, se necessário, recupera
-    valores de `dados`.
-    """
-    registro = dict(registro or {})
-    dados = registro.get("dados")
-    if not isinstance(dados, dict):
-        dados = {}
-
-    registro["itens"] = registro.get("itens") or dados.get("itens") or []
-    registro["embalagem_pedido"] = (
-        registro.get("embalagem_pedido")
-        or dados.get("embalagem_pedido")
-        or {"descricao": "", "valor": 0.0}
-    )
-    registro["embalagens_especiais"] = (
-        registro.get("embalagens_especiais")
-        or dados.get("embalagens_especiais")
-        or []
-    )
-    registro["adicionais"] = (
-        registro.get("adicionais")
-        or dados.get("adicionais")
-        or []
-    )
-    registro["observacao"] = (
-        registro.get("observacao")
-        if registro.get("observacao") is not None
-        else dados.get("observacao", "")
-    )
-    registro["desconto_geral"] = (
-        registro.get("desconto_geral")
-        if registro.get("desconto_geral") is not None
-        else dados.get("desconto_geral", "")
-    )
-
-    try:
-        registro["numero"] = int(registro.get("numero", 0))
-    except (TypeError, ValueError):
-        registro["numero"] = 0
-
-    try:
-        registro["total"] = float(registro.get("total", 0.0))
-    except (TypeError, ValueError):
-        registro["total"] = 0.0
-
-    return registro
-
-
-def carregar_historico_supabase():
-    try:
-        response = (
-            supabase.table("orcamentos")
-            .select("*")
-            .order("numero", desc=True)
-            .execute()
-        )
-        return [normalizar_orcamento(item) for item in (response.data or [])]
-    except Exception as e:
-        st.error(f"Erro ao buscar dados do Supabase: {e}")
-        return []
-
-
-def obter_proximo_numero():
-    """
-    Obtém o maior número salvo e soma 1.
-
-    Para uso com vários usuários ao mesmo tempo, o ideal é criar uma sequence
-    no PostgreSQL. Para este aplicativo, esta versão mantém a lógica atual.
-    """
-    try:
-        response = (
-            supabase.table("orcamentos")
-            .select("numero")
-            .order("numero", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if response.data:
-            maior_numero = int(response.data[0]["numero"])
-            return max(234, maior_numero + 1)
-        return 234
-    except Exception as e:
-        raise RuntimeError(f"Não foi possível obter o próximo número: {e}") from e
-
-
-def preparar_registro_supabase(novo_registro):
-    """Prepara o registro para inserir ou atualizar no Supabase."""
-    registro = dict(novo_registro)
-
-    registro["numero"] = int(registro["numero"])
-    registro["cliente"] = str(registro["cliente"]).strip()
-    registro["data_entrega"] = str(registro["data_entrega"])
-    registro["itens"] = list(registro.get("itens") or [])
-    registro["embalagem_pedido"] = dict(
-        registro.get("embalagem_pedido")
-        or {"descricao": "", "valor": 0.0}
-    )
-    registro["embalagens_especiais"] = list(
-        registro.get("embalagens_especiais") or []
-    )
-    registro["adicionais"] = list(registro.get("adicionais") or [])
-    registro["observacao"] = str(registro.get("observacao") or "")
-    registro["desconto_geral"] = str(registro.get("desconto_geral") or "")
-    registro["total"] = round(float(registro.get("total", 0.0)), 2)
-
-    if not registro["cliente"]:
-        raise ValueError("O nome da cliente não pode ficar vazio.")
-
-    registro["dados"] = {
-        "itens": registro["itens"],
-        "embalagem_pedido": registro["embalagem_pedido"],
-        "embalagens_especiais": registro["embalagens_especiais"],
-        "adicionais": registro["adicionais"],
-        "observacao": registro["observacao"],
-        "desconto_geral": registro["desconto_geral"],
-        "total": registro["total"],
-    }
-
-    return registro
-
-
-def salvar_orcamento_supabase(novo_registro):
-    try:
-        registro = preparar_registro_supabase(novo_registro)
-        response = supabase.table("orcamentos").insert(registro).execute()
-        if not response.data:
-            raise RuntimeError("O Supabase não confirmou a inclusão.")
-        return True
-    except Exception as e:
-        st.error(f"Erro ao salvar: {e}")
-        return False
-
-
-def atualizar_orcamento_supabase(orcamento_id, registro_atualizado):
-    """Atualiza o registro existente sem alterar seu número."""
-    try:
-        if not orcamento_id:
-            raise ValueError("Identificador do orçamento não encontrado.")
-
-        registro = preparar_registro_supabase(registro_atualizado)
-        response = (
-            supabase.table("orcamentos")
-            .update(registro)
-            .eq("id", str(orcamento_id))
-            .execute()
-        )
-        if not response.data:
-            raise RuntimeError("O Supabase não confirmou a atualização.")
-        return True
-    except Exception as e:
-        st.error(f"Erro ao atualizar: {e}")
-        return False
-
 
 
 CATALOGO = {
@@ -288,1424 +98,697 @@ CATALOGO = {
     "Brigadeiro de Chocolate em massa": {"tipo": "kg", "preco_kg": 84.90},
     "Brigadeiro de Chocolate Branco": {"tipo": "unitario", "preco_cento": 150.00},
     "Brigadeiro de Ninho com Rosetas Coloridas e Apliques de Pasta Americana": {
-        "tipo": "unitario",
-        "preco_cento": 160.00,
+        "tipo": "unitario", "preco_cento": 160.00,
     },
 }
 
-
-# --- REGRAS DE PREÇO POR QUANTIDADE ---
-#
-# A faixa de preço é definida pela QUANTIDADE TOTAL DE DOCES do pedido,
-# independentemente de quantos sabores foram escolhidos.
-#
-# Exemplo:
-# 50 Brigadeiros + 50 Ninhos = 100 doces.
-# Os dois sabores passam a usar o valor unitário da faixa de 100 doces.
-#
-# O Aplique NÃO entra na quantidade total de doces e permanece sempre
-# em R$ 1,50 por unidade.
-#
-# Objetivo comercial da tabela:
-# - até 25 doces: preço unitário cheio;
-# - de 26 a 49: desconto progressivo, mas ainda com valor mais alto para
-#   tornar pedidos a partir de 50 mais atrativos;
-# - de 50 a 100: o valor UNITÁRIO diminui progressivamente conforme a
-#   quantidade aumenta;
-# - 90 unidades ficam próximas do cento para incentivar 100 unidades;
-# - a partir de 100: preço normal proporcional ao valor do cento.
 REGRAS_PRECO_DOCES = {
-    125.00: {
-        "unitario_ate_25": 1.50,
-        40: 58.90,
-        50: 68.90,
-        75: 98.90,
-        90: 116.90,
-        100: 125.00,
-    },
-    130.00: {
-        "unitario_ate_25": 1.50,
-        40: 59.90,
-        50: 71.90,
-        75: 104.90,
-        90: 123.90,
-        100: 130.00,
-    },
-    150.00: {
-        "unitario_ate_25": 2.00,
-        40: 77.90,
-        50: 82.90,
-        75: 117.90,
-        90: 140.90,
-        100: 150.00,
-    },
-    160.00: {
-        "unitario_ate_25": 2.00,
-        40: 78.90,
-        50: 85.00,
-        75: 124.90,
-        90: 148.90,
-        100: 160.00,
-    },
+    125.00: {"unitario_ate_25": 1.50, 40: 58.90, 50: 68.90, 75: 98.90, 90: 116.90, 100: 125.00},
+    130.00: {"unitario_ate_25": 1.50, 40: 59.90, 50: 71.90, 75: 104.90, 90: 123.90, 100: 130.00},
+    150.00: {"unitario_ate_25": 2.00, 40: 77.90, 50: 82.90, 75: 117.90, 90: 140.90, 100: 150.00},
+    160.00: {"unitario_ate_25": 2.00, 40: 78.90, 50: 85.00, 75: 124.90, 90: 148.90, 100: 160.00},
 }
 
 
 def interpolar(valor_inicial, valor_final, posicao):
-    """Interpolação linear entre dois valores. posicao deve ficar entre 0 e 1."""
-    return valor_inicial + ((valor_final - valor_inicial) * posicao)
+    return valor_inicial + (valor_final - valor_inicial) * posicao
 
 
 def calcular_valor_unitario_doces(preco_cento, quantidade_total_doces):
-    """
-    Retorna o valor UNITÁRIO efetivo de um doce com base na quantidade
-    TOTAL de doces do pedido.
-
-    A quantidade total do pedido define a faixa para todos os sabores.
-    O cálculo é interpolado sobre o valor unitário, garantindo que o
-    valor por unidade nunca aumente quando a quantidade aumenta.
-
-    Regras comerciais:
-    - 1 a 25: preço unitário cheio;
-    - 26 a 40: desconto leve (faixa ainda mais puxada);
-    - 41 a 50: aproxima do pacote mínimo desejado de 50 unidades;
-    - 51 a 75: desconto progressivo;
-    - 76 a 90: desconto progressivo;
-    - 91 a 99: aproxima do cento;
-    - 100+: valor normal proporcional do cento.
-    """
     preco_cento = round(float(preco_cento), 2)
     qtd = max(int(quantidade_total_doces), 1)
-
     regra = REGRAS_PRECO_DOCES.get(preco_cento)
-
-    # Produto futuro ainda não configurado: cálculo proporcional padrão.
-    if regra is None:
+    if regra is None or qtd >= 100:
         return preco_cento / 100
-
-    unitario_25 = float(regra["unitario_ate_25"])
-
-    # Até 25 unidades: preço cheio por unidade.
     if qtd <= 25:
-        return unitario_25
-
-    # A partir de 100: preço normal do cento.
-    if qtd >= 100:
-        return preco_cento / 100
-
-    # Converte as âncoras de preço total em preço unitário.
-    unitario_40 = float(regra[40]) / 40
-    unitario_50 = float(regra[50]) / 50
-    unitario_75 = float(regra[75]) / 75
-    unitario_90 = float(regra[90]) / 90
-    unitario_100 = float(regra[100]) / 100
-
-    # 26 a 40: desconto bem leve para manter pedido pequeno mais puxado.
-    if qtd <= 40:
-        posicao = (qtd - 25) / (40 - 25)
-        return interpolar(unitario_25, unitario_40, posicao)
-
-    # 41 a 50: começa a ficar mais vantajoso para chegar no mínimo de 50.
-    if qtd <= 50:
-        posicao = (qtd - 40) / (50 - 40)
-        return interpolar(unitario_40, unitario_50, posicao)
-
-    # 51 a 75: valor unitário continua caindo.
-    if qtd <= 75:
-        posicao = (qtd - 50) / (75 - 50)
-        return interpolar(unitario_50, unitario_75, posicao)
-
-    # 76 a 90.
-    if qtd <= 90:
-        posicao = (qtd - 75) / (90 - 75)
-        return interpolar(unitario_75, unitario_90, posicao)
-
-    # 91 a 99: aproxima do valor do cento para incentivar 100 unidades.
-    posicao = (qtd - 90) / (100 - 90)
-    return interpolar(unitario_90, unitario_100, posicao)
+        return float(regra["unitario_ate_25"])
+    pontos = [(25, float(regra["unitario_ate_25"]))]
+    pontos.extend((n, float(regra[n]) / n) for n in (40, 50, 75, 90, 100))
+    for (inicio, valor_inicio), (fim, valor_fim) in zip(pontos, pontos[1:]):
+        if qtd <= fim:
+            return interpolar(valor_inicio, valor_fim, (qtd - inicio) / (fim - inicio))
+    return preco_cento / 100
 
 
 def calcular_preco_doces(preco_cento, qtd):
-    """
-    Calcula quanto custaria um pedido inteiro de um único preço de cento
-    na quantidade informada.
-
-    Esta função usa a mesma regra unitária progressiva aplicada nos pedidos
-    com vários sabores.
-    """
     qtd = max(int(qtd), 1)
-    valor_unitario = calcular_valor_unitario_doces(preco_cento, qtd)
-    return round(valor_unitario * qtd, 2)
+    return round(calcular_valor_unitario_doces(preco_cento, qtd) * qtd, 2)
 
 
 def item_eh_aplique(item):
-    """
-    Identifica o Aplique com compatibilidade para itens novos e antigos.
+    return item.get("conta_como_doce") is False or str(item.get("produto", "")).strip().casefold() == "aplique"
 
-    Nos itens novos, usamos a flag conta_como_doce=False.
-    Nos orçamentos antigos, em que essa flag não existe, o nome "Aplique"
-    continua sendo reconhecido automaticamente.
-    """
-    if item.get("conta_como_doce") is False:
-        return True
-    return str(item.get("produto", "")).strip().casefold() == "aplique"
+
+def item_eh_ninho_tematico(item):
+    return str(item.get("produto", "")).strip().casefold() == "ninho temático"
 
 
 def calcular_total_doces_pedido(itens):
-    """
-    Soma somente os doces reais do pedido para definir a faixa de preço.
-
-    Exemplos:
-    - 50 Brigadeiros + 50 Ninhos = 100 doces.
-    - 100 Ninhos + 100 Apliques = 100 doces.
-
-    Aplique e itens vendidos por peso não entram nessa quantidade.
-    """
-    total = 0
-    for item in itens:
-        if item.get("tipo") == "unitario" and not item_eh_aplique(item):
-            total += int(item.get("qtd", 0))
-    return total
+    return sum(int(it.get("qtd", 0)) for it in itens if it.get("tipo") == "unitario" and not item_eh_aplique(it))
 
 
 def calcular_subtotal_item(item, quantidade_total_doces=None):
-    """
-    Calcula o subtotal de um item usando a quantidade TOTAL de doces do pedido.
-
-    Exemplo:
-    - 50 Brigadeiros + 50 Ninhos = 100 doces no pedido.
-      Ambos são cobrados na faixa de 100 unidades, sem acréscimo de pedido menor.
-
-    Regras especiais:
-    - Aplique: sempre R$ 1,50 por unidade e não interfere na faixa dos doces.
-    - Itens por kg: continuam com o cálculo normal por peso.
-    """
     if item["tipo"] == "unitario":
-        qtd_item = int(item["qtd"])
-
-        # Aplique é sempre cobrado a R$ 1,50 por unidade.
+        qtd = int(item["qtd"])
         if item_eh_aplique(item):
-            subtotal_bruto = float(item.get("preco_unitario") or 1.50) * qtd_item
+            bruto = float(item.get("preco_unitario") or 1.50) * qtd
+        elif item_eh_ninho_tematico(item) and item.get("preco_manual", False):
+            bruto = float(item["preco_cento"]) / 100 * qtd
         else:
-            # Compatibilidade: se a função for chamada isoladamente,
-            # usa a própria quantidade do item como quantidade total.
-            total_doces = int(quantidade_total_doces or qtd_item)
-            total_doces = max(total_doces, 1)
-
-            # A quantidade TOTAL do pedido define o valor unitário efetivo.
-            # Assim, misturar sabores mantém a mesma faixa comercial.
-            valor_unitario_efetivo = calcular_valor_unitario_doces(
-                item["preco_cento"],
-                total_doces,
-            )
-            subtotal_bruto = valor_unitario_efetivo * qtd_item
-
-        subtotal_bruto = round(subtotal_bruto, 2)
+            total_doces = max(int(quantidade_total_doces or qtd), 1)
+            bruto = calcular_valor_unitario_doces(item["preco_cento"], total_doces) * qtd
+        bruto = round(bruto, 2)
     else:
-        subtotal_bruto = (item["preco_kg"] / 1000) * item["gramas"]
-
-    desconto_item_valor, desconto_item_desc = calcular_desconto(
-        subtotal_bruto, item.get("desconto", "")
-    )
-    subtotal_final = subtotal_bruto - desconto_item_valor
-    return subtotal_bruto, desconto_item_valor, desconto_item_desc, subtotal_final
+        bruto = float(item["preco_kg"]) / 1000 * int(item["gramas"])
+    desconto, descricao = calcular_desconto(bruto, item.get("desconto", ""))
+    return bruto, desconto, descricao, bruto - desconto
 
 
 def gerar_texto_item(item):
-    if item["tipo"] == "unitario":
-        return f"{item['qtd']}un - {item['produto']}"
-    else:
-        return f"{formatar_peso(item['gramas'])} - {item['produto']}"
+    quantidade = f"{item['qtd']}un" if item["tipo"] == "unitario" else formatar_peso(item["gramas"])
+    return f"{quantidade} - {item['produto']}"
 
 
 def calcular_total_embalagens_pedido(embalagem_pedido):
-    if (
-        embalagem_pedido.get("descricao", "").strip()
-        and embalagem_pedido.get("valor", 0) > 0
-    ):
+    if embalagem_pedido.get("descricao", "").strip() and embalagem_pedido.get("valor", 0) > 0:
         return float(embalagem_pedido["valor"])
     return 0.0
 
 
 def calcular_total_embalagens_especiais(embalagens_especiais):
-    total = 0.0
-    for emb in embalagens_especiais:
-        total += float(emb["qtd"]) * float(emb["valor_unit"])
-    return total
+    return sum(float(emb["qtd"]) * float(emb["valor_unit"]) for emb in embalagens_especiais)
 
 
 def calcular_total_adicionais(adicionais):
-    total = 0.0
-    for ad in adicionais:
-        total += float(ad["valor"])
-    return total
+    return sum(float(ad["valor"]) for ad in adicionais)
 
 
-def gerar_imagem(
-    cliente,
-    data_entrega,
-    itens,
-    numero_orcamento,
-    desconto_geral_str="",
-    embalagem_pedido=None,
-    embalagens_especiais=None,
-    adicionais=None,
-    observacao="",
-):
+def calcular_resumo(itens, embalagem_pedido, embalagens_especiais, adicionais, desconto_geral):
+    qtd = calcular_total_doces_pedido(itens)
+    calculos = [calcular_subtotal_item(it, qtd) for it in itens]
+    emb = calcular_total_embalagens_pedido(embalagem_pedido)
+    especiais = calcular_total_embalagens_especiais(embalagens_especiais)
+    extras = calcular_total_adicionais(adicionais)
+    subtotal = sum(it[0] for it in calculos) + emb + especiais + extras
+    desc_itens = sum(it[1] for it in calculos)
+    desc_geral, _ = calcular_desconto(subtotal - desc_itens, desconto_geral)
+    return {
+        "total_doces": qtd,
+        "total_gramas": sum(int(it["gramas"]) for it in itens if it["tipo"] != "unitario"),
+        "total_emb_pedido": emb, "total_emb_especiais": especiais,
+        "total_adicionais": extras, "subtotal": subtotal,
+        "desconto_itens": desc_itens, "desconto_geral": desc_geral,
+        "total": subtotal - desc_itens - desc_geral,
+    }
+
+
+# Persistência: preco_manual e preco_cento ficam dentro dos itens JSON,
+# sem precisar criar colunas novas no Supabase.
+def normalizar_orcamento(registro):
+    registro = dict(registro or {})
+    dados = registro.get("dados")
+    if not isinstance(dados, dict):
+        dados = {}
+    for campo, padrao in (
+        ("itens", []), ("embalagem_pedido", {"descricao": "", "valor": 0.0}),
+        ("embalagens_especiais", []), ("adicionais", []),
+    ):
+        registro[campo] = registro.get(campo) or dados.get(campo) or padrao
+    for campo in ("observacao", "desconto_geral"):
+        if registro.get(campo) is None:
+            registro[campo] = dados.get(campo, "")
+    try:
+        registro["numero"] = int(registro.get("numero", 0))
+    except (TypeError, ValueError):
+        registro["numero"] = 0
+    try:
+        valor = registro.get("total")
+        registro["total"] = float(dados.get("total", 0) if valor is None else valor)
+    except (TypeError, ValueError):
+        registro["total"] = 0.0
+    return registro
+
+
+def preparar_registro_supabase(novo_registro):
+    registro = dict(novo_registro)
+    registro["numero"] = int(registro["numero"])
+    registro["cliente"] = str(registro["cliente"]).strip()
+    registro["data_entrega"] = str(registro["data_entrega"])
+    if not registro["cliente"]:
+        raise ValueError("O nome da cliente não pode ficar vazio.")
+    for campo in ("itens", "embalagens_especiais", "adicionais"):
+        registro[campo] = list(registro.get(campo) or [])
+    registro["embalagem_pedido"] = dict(registro.get("embalagem_pedido") or {"descricao": "", "valor": 0.0})
+    for campo in ("observacao", "desconto_geral"):
+        registro[campo] = str(registro.get(campo) or "")
+    registro["total"] = round(float(registro.get("total", 0)), 2)
+    registro["dados"] = {campo: registro[campo] for campo in (
+        "itens", "embalagem_pedido", "embalagens_especiais", "adicionais",
+        "observacao", "desconto_geral", "total",
+    )}
+    return registro
+
+
+def carregar_historico_supabase():
+    try:
+        resposta = supabase.table("orcamentos").select("*").order("numero", desc=True).execute()
+        return [normalizar_orcamento(it) for it in (resposta.data or [])]
+    except Exception as e:
+        st.error(f"Erro ao buscar dados do Supabase: {e}")
+        return []
+
+
+def obter_proximo_numero():
+    resposta = supabase.table("orcamentos").select("numero").order("numero", desc=True).limit(1).execute()
+    return max(234, int(resposta.data[0]["numero"]) + 1) if resposta.data else 234
+
+
+def salvar_orcamento_supabase(novo_registro):
+    try:
+        resposta = supabase.table("orcamentos").insert(preparar_registro_supabase(novo_registro)).execute()
+        if not resposta.data:
+            raise RuntimeError("O Supabase não confirmou a inclusão.")
+        return resposta.data[0]
+    except Exception as e:
+        st.error(f"Erro ao salvar: {e}")
+        return None
+
+
+def atualizar_orcamento_supabase(orcamento_id, registro_atualizado):
+    try:
+        if not orcamento_id:
+            raise ValueError("Identificador do orçamento não encontrado.")
+        resposta = supabase.table("orcamentos").update(
+            preparar_registro_supabase(registro_atualizado)
+        ).eq("id", str(orcamento_id)).execute()
+        if not resposta.data:
+            raise RuntimeError("O Supabase não confirmou a atualização.")
+        return resposta.data[0]
+    except Exception as e:
+        st.error(f"Erro ao atualizar: {e}")
+        return None
+
+
+def gerar_imagem(cliente, data_entrega, itens, numero_orcamento,
+                 desconto_geral_str="", embalagem_pedido=None,
+                 embalagens_especiais=None, adicionais=None, observacao=""):
     embalagem_pedido = embalagem_pedido or {"descricao": "", "valor": 0.0}
     embalagens_especiais = embalagens_especiais or []
     adicionais = adicionais or []
-
+    observacao = str(observacao or "")
+    r = calcular_resumo(itens, embalagem_pedido, embalagens_especiais, adicionais, desconto_geral_str)
     W = 700
-    total_linhas = len(itens) + len(embalagens_especiais) + len(adicionais)
-    if (
-        embalagem_pedido.get("descricao", "").strip()
-        and embalagem_pedido.get("valor", 0) > 0
-    ):
-        total_linhas += 1
-
-    if total_linhas <= 8:
-        tam_fonte_item = 18
-        espaco_linha = 42
-    elif total_linhas <= 12:
-        tam_fonte_item = 16
-        espaco_linha = 36
-    else:
-        tam_fonte_item = 14
-        espaco_linha = 30
-
-    altura_cabecalho = 110
-    altura_rodape = 170
-    margem_inferior = 20
-
-    cor_fundo_logo = (255, 195, 153)
-    cor_marrom_logo = (65, 38, 30)
-    cor_destaque = (210, 80, 30)
-    cor_desconto = (180, 40, 40)
-    cor_cinza = (140, 140, 140)
-    cor_secao = (120, 70, 50)
-
-    x_desc = 50
-    x_preco_direita = 650
-    x_preco_min = 535
-    largura_desc = x_preco_min - x_desc - 12
-
-    fonte_item_previa = carregar_fonte(tam_fonte_item)
-    img_medida = Image.new("RGB", (W, 100), color=(255, 255, 255))
-    draw_medida = ImageDraw.Draw(img_medida)
-
-    def altura_bloco_orcamento(texto, tem_detalhe=False, fonte=None, largura=None):
-        fonte = fonte or fonte_item_previa
-        largura = largura or largura_desc
-        linhas = quebrar_texto_largura(draw_medida, texto, fonte, largura)
-        altura_linha = altura_linha_fonte(draw_medida, fonte)
-        extra = 24 if tem_detalhe else 0
-        return max(espaco_linha, len(linhas) * altura_linha + extra + 8)
-
-    quantidade_total_doces = calcular_total_doces_pedido(itens)
-
-    total_altura_itens = 0
+    fundo, marrom = (255, 195, 153), (65, 38, 30)
+    destaque, desconto_cor = (210, 80, 30), (180, 40, 40)
+    cinza, secao = (140, 140, 140), (120, 70, 50)
+    quantidade_linhas = len(itens) + len(embalagens_especiais) + len(adicionais) + int(r["total_emb_pedido"] > 0)
+    tamanho, espaco = (18, 42) if quantidade_linhas <= 8 else ((16, 36) if quantidade_linhas <= 12 else (14, 30))
+    medida = ImageDraw.Draw(Image.new("RGB", (W, 100), "white"))
+    linhas = []
     for item in itens:
-        _, _, desconto_item_desc, _ = calcular_subtotal_item(
-            item, quantidade_total_doces
-        )
-        texto_prev = gerar_texto_item(item)
-        if desconto_item_desc:
-            texto_prev += f" (-{desconto_item_desc})"
-        total_altura_itens += altura_bloco_orcamento(
-            texto_prev, tem_detalhe=bool(desconto_item_desc)
-        )
-
-    if (
-        embalagem_pedido.get("descricao", "").strip()
-        and embalagem_pedido.get("valor", 0) > 0
-    ):
-        texto_prev = f"Embalagem do pedido - {embalagem_pedido['descricao']}"
-        total_altura_itens += altura_bloco_orcamento(
-            texto_prev, fonte=carregar_fonte(tam_fonte_item, True)
-        )
-
+        bruto, desc, desc_texto, total = calcular_subtotal_item(item, r["total_doces"])
+        nome = gerar_texto_item(item)
+        if desc_texto:
+            nome += f" (-{desc_texto})"
+        detalhe = f"Original: {formatar_real(bruto)} | Desconto: -{formatar_real(desc)}" if desc > 0 else None
+        linhas.append([nome, formatar_real(total), marrom, False, detalhe])
+    if r["total_emb_pedido"] > 0:
+        linhas.append([f"Embalagem do pedido - {embalagem_pedido['descricao']}", formatar_real(r["total_emb_pedido"]), secao, True, None])
     for emb in embalagens_especiais:
-        texto_prev = f"Embalagem especial - {emb['qtd']}x {emb['descricao']}"
-        total_altura_itens += altura_bloco_orcamento(texto_prev)
-
+        linhas.append([f"Embalagem especial - {emb['qtd']}x {emb['descricao']}", formatar_real(float(emb["qtd"]) * float(emb["valor_unit"])), secao, False, None])
     for ad in adicionais:
-        texto_prev = f"Adicional - {ad['descricao']}"
-        total_altura_itens += altura_bloco_orcamento(texto_prev)
-
-    altura_obs = 0
-    if observacao.strip():
-        fonte_obs_previa = carregar_fonte(14)
-        linhas_obs_previas = quebrar_texto_largura(
-            draw_medida, observacao.strip(), fonte_obs_previa, 600
-        )
-        altura_obs = 40 + (len(linhas_obs_previas) * 22)
-
-    y_pos = altura_cabecalho + 30
-    y_itens_inicio = y_pos + 140
-    y_itens_fim = y_itens_inicio + total_altura_itens
-
-    y_fim_conteudo = y_itens_fim + 370 + altura_obs
-    y_topo_rodape = max(y_fim_conteudo + 80, 980)
-    H = y_topo_rodape + altura_rodape + margem_inferior
-
-    img = Image.new("RGB", (W, int(H)), color=(255, 255, 255))
+        linhas.append([f"Adicional - {ad['descricao']}", formatar_real(float(ad["valor"])), secao, False, None])
+    preparadas = []
+    for nome, valor, cor, negrito, detalhe in linhas:
+        fonte = carregar_fonte(tamanho, negrito)
+        partes = quebrar_texto_largura(medida, nome, fonte, 473)
+        altura_linha = altura_linha_fonte(medida, fonte)
+        altura = max(espaco, len(partes) * altura_linha + (24 if detalhe else 0) + 8)
+        preparadas.append((partes, valor, cor, fonte, detalhe, altura_linha, altura))
+    clientes = quebrar_texto_largura(medida, f"CLIENTE: {cliente.upper()}", carregar_fonte(18, True), 600)
+    extra_cliente = max(0, len(clientes) - 1) * 28
+    obs = quebrar_texto_largura(medida, observacao, carregar_fonte(14), 600) if observacao.strip() else []
+    y_inicio = 280 + extra_cliente
+    y_fim = y_inicio + sum(it[6] for it in preparadas)
+    y_total = y_fim + 35 + (30 if r["total_doces"] > 0 else 0) + (35 if r["total_gramas"] > 0 else 5)
+    for chave, incremento in (("total_emb_pedido", 30), ("total_emb_especiais", 25), ("total_adicionais", 25), ("desconto_itens", 35), ("desconto_geral", 35)):
+        if r[chave] > 0:
+            y_total += incremento
+    if obs:
+        y_total += 85 + len(obs) * 22
+    y_total += 75
+    rodape = max(980, y_total + 205)
+    img = Image.new("RGB", (W, rodape + 190), "white")
     draw = ImageDraw.Draw(img)
 
-    # CABEÇALHO
-    draw.rectangle([0, 0, W, altura_cabecalho], fill=cor_fundo_logo)
+    def texto(x, y, conteudo, tam=18, bold=False, cor=marrom):
+        draw.text((x, y), str(conteudo), font=carregar_fonte(tam, bold), fill=cor)
+
+    def direita(y, conteudo, tam=18, bold=True, cor=marrom):
+        fonte = carregar_fonte(tam, bold)
+        draw.text((650 - largura_texto(draw, conteudo, fonte), y), conteudo, font=fonte, fill=cor)
+
+    draw.rectangle((0, 0, W, 110), fill=fundo)
     try:
-        caminho_logo = BASE_DIR / "logo.png"
-        logo = Image.open(caminho_logo).convert("RGBA")
-        tamanho_logo = 130
-        logo = logo.resize((tamanho_logo, tamanho_logo))
-        pos_x = (W - tamanho_logo) // 2
-        pos_y = (altura_cabecalho - tamanho_logo) // 2
-        img.paste(logo, (pos_x, pos_y), logo)
-    except Exception:
-        draw.text(
-            (220, 40),
-            "DOCITO DOCERIA",
-            fill=cor_marrom_logo,
-            font=carregar_fonte(30, True),
-        )
-
-    # DADOS
-    draw.text(
-        (50, y_pos),
-        f"ORÇAMENTO Nº {numero_orcamento:03d}",
-        fill=cor_marrom_logo,
-        font=carregar_fonte(26, True),
-    )
-    draw.text(
-        (50, y_pos + 50),
-        f"CLIENTE: {cliente.upper()}",
-        fill=cor_marrom_logo,
-        font=carregar_fonte(18, True),
-    )
-    draw.text(
-        (50, y_pos + 80),
-        f"ENTREGA: {data_entrega.strftime('%d/%m/%Y')}",
-        fill=cor_destaque,
-        font=carregar_fonte(18, True),
-    )
-    draw.line((50, y_pos + 115, 650, y_pos + 115), fill=cor_fundo_logo, width=3)
-
-    # ITENS PRINCIPAIS
-    y_itens = y_itens_inicio
-    total_bruto_itens = 0
-    total_desconto_itens = 0
-    total_doces = quantidade_total_doces
-    total_gramas = 0
-    fonte_item = carregar_fonte(tam_fonte_item)
-
-    def desenhar_linha_com_preco(
-        y,
-        texto,
-        texto_valor,
-        cor_texto,
-        fonte_texto,
-        cor_valor=None,
-        fonte_valor=None,
-        detalhe_desc=None,
-    ):
-        cor_valor = cor_valor or cor_texto
-        fonte_valor = fonte_valor or fonte_texto
-        linhas = quebrar_texto_largura(draw, texto, fonte_texto, largura_desc)
-        altura_linha = altura_linha_fonte(draw, fonte_texto)
-
-        for i, linha in enumerate(linhas):
-            draw.text(
-                (x_desc, y + (i * altura_linha)),
-                linha,
-                fill=cor_texto,
-                font=fonte_texto,
-            )
-
-        bbox_valor = draw.textbbox((0, 0), texto_valor, font=fonte_valor)
-        largura_valor = bbox_valor[2] - bbox_valor[0]
-        draw.text(
-            (x_preco_direita - largura_valor, y),
-            texto_valor,
-            fill=cor_valor,
-            font=fonte_valor,
-        )
-        altura_usada = len(linhas) * altura_linha
-        if detalhe_desc:
-            draw.text(
-                (x_desc + 15, y + altura_usada),
-                detalhe_desc,
-                fill=cor_cinza,
-                font=carregar_fonte(max(tam_fonte_item - 4, 11)),
-            )
-            altura_usada += 24
-        return y + max(espaco_linha, altura_usada + 8)
-
-    for item in itens:
-        (
-            subtotal_bruto,
-            desconto_item_valor,
-            desconto_item_desc,
-            subtotal_final,
-        ) = calcular_subtotal_item(item, quantidade_total_doces)
-        total_bruto_itens += subtotal_bruto
-        total_desconto_itens += desconto_item_valor
-
-        if item["tipo"] != "unitario":
-            total_gramas += item["gramas"]
-
-        texto_item = gerar_texto_item(item)
-        if desconto_item_desc:
-            texto_item += f" (-{desconto_item_desc})"
-        texto_valor = formatar_real(subtotal_final)
-
-        detalhe_desc = None
-        if desconto_item_valor > 0:
-            detalhe_desc = (
-                f"Original: {formatar_real(subtotal_bruto)} | "
-                f"Desconto: -{formatar_real(desconto_item_valor)}"
-            )
-
-        y_itens = desenhar_linha_com_preco(
-            y=y_itens,
-            texto=texto_item,
-            texto_valor=texto_valor,
-            cor_texto=cor_marrom_logo,
-            fonte_texto=fonte_item,
-            detalhe_desc=detalhe_desc,
-        )
-
-    # EMBALAGEM DO PEDIDO
-    total_emb_pedido = calcular_total_embalagens_pedido(embalagem_pedido)
-    if total_emb_pedido > 0:
-        y_itens = desenhar_linha_com_preco(
-            y=y_itens,
-            texto=f"Embalagem do pedido - {embalagem_pedido['descricao']}",
-            texto_valor=formatar_real(total_emb_pedido),
-            cor_texto=cor_secao,
-            fonte_texto=carregar_fonte(tam_fonte_item, True),
-            cor_valor=cor_secao,
-            fonte_valor=fonte_item,
-        )
-
-    # EMBALAGENS ESPECIAIS
-    for emb in embalagens_especiais:
-        total_emb_item = float(emb["qtd"]) * float(emb["valor_unit"])
-        texto = f"Embalagem especial - {emb['qtd']}x {emb['descricao']}"
-        texto_valor = formatar_real(total_emb_item)
-        y_itens = desenhar_linha_com_preco(
-            y=y_itens,
-            texto=texto,
-            texto_valor=texto_valor,
-            cor_texto=cor_secao,
-            fonte_texto=fonte_item,
-        )
-
-    # ADICIONAIS
-    for ad in adicionais:
-        texto = f"Adicional - {ad['descricao']}"
-        texto_valor = formatar_real(float(ad["valor"]))
-        y_itens = desenhar_linha_com_preco(
-            y=y_itens,
-            texto=texto,
-            texto_valor=texto_valor,
-            cor_texto=cor_secao,
-            fonte_texto=fonte_item,
-        )
-
-    total_emb_especiais = calcular_total_embalagens_especiais(embalagens_especiais)
-    total_adicionais = calcular_total_adicionais(adicionais)
-
-    total_bruto_general = (
-        total_bruto_itens + total_emb_pedido + total_emb_especiais + total_adicionais
-    )
-    total_com_desconto_itens = total_bruto_general - total_desconto_itens
-    desconto_geral_valor, _ = calcular_desconto(
-        total_com_desconto_itens, desconto_geral_str
-    )
-    total_final = total_com_desconto_itens - desconto_geral_valor
-
-    # RESUMO
-    draw.line((50, y_itens + 15, 650, y_itens + 15), fill=cor_fundo_logo, width=3)
-    y_resumo = y_itens + 35
-
-    if total_doces > 0:
-        draw.text(
-            (50, y_resumo),
-            f"TOTAL DE DOCES: {total_doces}",
-            fill=cor_marrom_logo,
-            font=carregar_fonte(18, True),
-        )
-        y_resumo += 30
-
-    if total_gramas > 0:
-        draw.text(
-            (50, y_resumo),
-            f"PESO TOTAL: {formatar_peso(total_gramas)}",
-            fill=cor_marrom_logo,
-            font=carregar_fonte(18, True),
-        )
-        y_resumo += 35
+        with Image.open(BASE_DIR / "logo.png") as original:
+            logo = original.convert("RGBA")
+        logo.thumbnail((130, 100), Image.Resampling.LANCZOS)
+        img.paste(logo, ((W - logo.width) // 2, (110 - logo.height) // 2), logo)
+    except (OSError, ValueError):
+        titulo = "DOCITO DOCERIA"
+        texto((W - largura_texto(draw, titulo, carregar_fonte(30, True))) // 2, 40, titulo, 30, True)
+    texto(50, 140, f"ORÇAMENTO Nº {numero_orcamento:03d}", 26, True)
+    for i, parte in enumerate(clientes):
+        texto(50, 190 + i * 28, parte, 18, True)
+    texto(50, 220 + extra_cliente, f"ENTREGA: {data_entrega.strftime('%d/%m/%Y')}", 18, True, destaque)
+    draw.line((50, 255 + extra_cliente, 650, 255 + extra_cliente), fill=fundo, width=3)
+    y = y_inicio
+    for partes, valor, cor, fonte, detalhe, altura_linha, altura in preparadas:
+        for i, parte in enumerate(partes):
+            draw.text((50, y + i * altura_linha), parte, font=fonte, fill=cor)
+        direita(y, valor, tamanho, False, cor)
+        if detalhe:
+            texto(65, y + len(partes) * altura_linha, detalhe, max(tamanho - 4, 11), False, cinza)
+        y += altura
+    draw.line((50, y + 15, 650, y + 15), fill=fundo, width=3)
+    y += 35
+    if r["total_doces"] > 0:
+        texto(50, y, f"TOTAL DE DOCES: {r['total_doces']}", 18, True)
+        y += 30
+    if r["total_gramas"] > 0:
+        texto(50, y, f"PESO TOTAL: {formatar_peso(r['total_gramas'])}", 18, True)
+        y += 35
     else:
-        y_resumo += 5
-
-    draw.text(
-        (50, y_resumo),
-        "Subtotal",
-        fill=cor_marrom_logo,
-        font=carregar_fonte(18, True),
-    )
-    draw.text(
-        (520, y_resumo),
-        formatar_real(total_bruto_general),
-        fill=cor_marrom_logo,
-        font=carregar_fonte(18, True),
-    )
-
-    if total_emb_pedido > 0:
-        y_resumo += 30
-        draw.text(
-            (50, y_resumo), "Embalagem do pedido", fill=cor_cinza, font=carregar_fonte(14)
-        )
-        draw.text(
-            (520, y_resumo),
-            formatar_real(total_emb_pedido),
-            fill=cor_cinza,
-            font=carregar_fonte(14),
-        )
-
-    if total_emb_especiais > 0:
-        y_resumo += 25
-        draw.text(
-            (50, y_resumo),
-            "Embalagens especiais",
-            fill=cor_cinza,
-            font=carregar_fonte(14),
-        )
-        draw.text(
-            (520, y_resumo),
-            formatar_real(total_emb_especiais),
-            fill=cor_cinza,
-            font=carregar_fonte(14),
-        )
-
-    if total_adicionais > 0:
-        y_resumo += 25
-        draw.text(
-            (50, y_resumo), "Adicionais", fill=cor_cinza, font=carregar_fonte(14)
-        )
-        draw.text(
-            (520, y_resumo),
-            formatar_real(total_adicionais),
-            fill=cor_cinza,
-            font=carregar_fonte(14),
-        )
-
-    if total_desconto_itens > 0:
-        y_resumo += 35
-        draw.text(
-            (50, y_resumo),
-            "Desconto por itens",
-            fill=cor_desconto,
-            font=carregar_fonte(18, True),
-        )
-        draw.text(
-            (520, y_resumo),
-            f"-{formatar_real(total_desconto_itens)}",
-            fill=cor_desconto,
-            font=carregar_fonte(18, True),
-        )
-
-    if desconto_geral_valor > 0:
-        y_resumo += 35
-        draw.text(
-            (50, y_resumo),
-            "Desconto geral",
-            fill=cor_desconto,
-            font=carregar_fonte(18, True),
-        )
-        draw.text(
-            (520, y_resumo),
-            f"-{formatar_real(desconto_geral_valor)}",
-            fill=cor_desconto,
-            font=carregar_fonte(18, True),
-        )
-
-    if observacao.strip():
-        y_resumo += 40
-        draw.line((50, y_resumo, 650, y_resumo), fill=cor_fundo_logo, width=2)
-        y_resumo += 20
-        draw.text(
-            (50, y_resumo),
-            "OBSERVAÇÃO",
-            fill=cor_marrom_logo,
-            font=carregar_fonte(16, True),
-        )
-        y_resumo += 25
-        fonte_obs = carregar_fonte(14)
-        linhas_obs = quebrar_texto_largura(draw, observacao.strip(), fonte_obs, 600)
-        for linha in linhas_obs:
-            draw.text((50, y_resumo), linha, fill=cor_marrom_logo, font=fonte_obs)
-            y_resumo += 22
-
-    y_resumo += 50
-    draw.line((50, y_resumo, 650, y_resumo), fill=cor_fundo_logo, width=2)
-    y_resumo += 25
-    draw.text(
-        (50, y_resumo),
-        "TOTAL DO PEDIDO",
-        fill=cor_marrom_logo,
-        font=carregar_fonte(24, True),
-    )
-
-    texto_total = formatar_real(total_final)
-    fonte_total = carregar_fonte(28, True)
-    bbox_total = draw.textbbox((0, 0), texto_total, font=fonte_total)
-    largura_total = bbox_total[2] - bbox_total[0]
-    draw.text(
-        (650 - largura_total, y_resumo),
-        texto_total,
-        fill=cor_destaque,
-        font=fonte_total,
-    )
-
-    # PAGAMENTO
-    draw.text(
-        (50, y_resumo + 50),
-        "FORMAS DE PAGAMENTO",
-        fill=cor_marrom_logo,
-        font=carregar_fonte(16, True),
-    )
-    draw.text(
-        (50, y_resumo + 75),
-        "Pix | Dinheiro | Cartão | Criptomoedas",
-        fill=cor_marrom_logo,
-        font=carregar_fonte(16),
-    )
-    draw.text(
-        (50, y_resumo + 100),
-        "Cartão em até 12x com acréscimo da maquininha.",
-        fill=cor_marrom_logo,
-        font=carregar_fonte(14),
-    )
-    draw.text(
-        (50, y_resumo + 125),
-        "Data reservada mediante confirmação do pedido.",
-        fill=cor_marrom_logo,
-        font=carregar_fonte(14),
-    )
-
-    # VALIDADE
-    fuso_br = pytz.timezone("America/Sao_Paulo")
-    agora = datetime.now(fuso_br)
-    texto_v = f"Gerado em: {agora.strftime('%d/%m/%Y %H:%M')} | Validade: 15 dias"
-    fonte_v = carregar_fonte(11)
-    bbox_v = draw.textbbox((0, 0), texto_v, font=fonte_v)
-    draw.text(
-        (W - (bbox_v[2] - bbox_v[0]) - 50, y_topo_rodape - 25),
-        texto_v,
-        fill=(160, 160, 160),
-        font=fonte_v,
-    )
-
-    # RODAPÉ
-    draw.rectangle([0, y_topo_rodape, W, H], fill=cor_fundo_logo)
-    avisos = [
-        "• Forminhas 4 pétalas (brancas) inclusas.",
-        "• Forminhas decorativas fornecidas pelo cliente",
-        "  terão custo adicional por caixa extra utilizada.",
-    ]
-    for i, aviso in enumerate(avisos):
-        draw.text(
-            (45, y_topo_rodape + 15 + (i * 22)),
-            aviso,
-            fill=cor_marrom_logo,
-            font=carregar_fonte(15),
-        )
-
-    y_linha = y_topo_rodape + 85
-    draw.line((45, y_linha, 655, y_linha), fill=cor_marrom_logo, width=1)
-    contatos = "Instagram: @docito_doceria123 | WhatsApp: (37) 99996-5194"
-    fonte_contatos = carregar_fonte(14, True)
-    bbox_contatos = draw.textbbox((0, 0), contatos, font=fonte_contatos)
-    draw.text(
-        ((W - (bbox_contatos[2] - bbox_contatos[0])) // 2, y_linha + 12),
-        contatos,
-        fill=cor_marrom_logo,
-        font=fonte_contatos,
-    )
-
+        y += 5
+    texto(50, y, "Subtotal", 18, True)
+    direita(y, formatar_real(r["subtotal"]))
+    for chave, titulo, incremento in (("total_emb_pedido", "Embalagem do pedido", 30), ("total_emb_especiais", "Embalagens especiais", 25), ("total_adicionais", "Adicionais", 25)):
+        if r[chave] > 0:
+            y += incremento
+            texto(50, y, titulo, 14, False, cinza)
+            direita(y, formatar_real(r[chave]), 14, False, cinza)
+    for chave, titulo in (("desconto_itens", "Desconto por itens"), ("desconto_geral", "Desconto geral")):
+        if r[chave] > 0:
+            y += 35
+            texto(50, y, titulo, 18, True, desconto_cor)
+            direita(y, "-" + formatar_real(r[chave]), 18, True, desconto_cor)
+    if obs:
+        y += 40
+        draw.line((50, y, 650, y), fill=fundo, width=2)
+        y += 20
+        texto(50, y, "OBSERVAÇÃO", 16, True)
+        y += 25
+        for parte in obs:
+            texto(50, y, parte, 14)
+            y += 22
+    y += 50
+    draw.line((50, y, 650, y), fill=fundo, width=2)
+    y += 25
+    texto(50, y, "TOTAL DO PEDIDO", 24, True)
+    direita(y, formatar_real(r["total"]), 28, True, destaque)
+    texto(50, y + 50, "FORMAS DE PAGAMENTO", 16, True)
+    texto(50, y + 75, "Pix | Dinheiro | Cartão | Criptomoedas", 16)
+    texto(50, y + 100, "Cartão em até 12x com acréscimo da maquininha.", 14)
+    texto(50, y + 125, "Data reservada mediante confirmação do pedido.", 14)
+    agora = datetime.now(pytz.timezone("America/Sao_Paulo"))
+    direita(rodape - 25, f"Gerado em: {agora.strftime('%d/%m/%Y %H:%M')} | Validade: 15 dias", 11, False, (160, 160, 160))
+    draw.rectangle((0, rodape, W, img.height), fill=fundo)
+    for i, aviso in enumerate(("• Forminhas 4 pétalas (brancas) inclusas.", "• Forminhas decorativas fornecidas pelo cliente", "  terão custo adicional por caixa extra utilizada.")):
+        texto(45, rodape + 15 + i * 22, aviso, 15)
+    draw.line((45, rodape + 85, 655, rodape + 85), fill=marrom, width=1)
+    contato = "Instagram: @docito_doceria123 | WhatsApp: (37) 99996-5194"
+    texto((W - largura_texto(draw, contato, carregar_fonte(14, True))) // 2, rodape + 97, contato, 14, True)
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
 
 
-st.set_page_config(page_title="Docito Doceria - Orçamentos", page_icon="🍰")
+OPCOES_PAGINAS = ["✍️ Criar Novo Orçamento", "🔍 Buscar e Histórico"]
 
-try:
-    st.image(str(BASE_DIR / "logo.png"), width=100)
-except Exception:
-    st.title("🍰 DOCITO DOCERIA")
 
-st.title("Gerador de Orçamentos")
-st.caption("Motor de preços V7 ativo")
+def hoje_brasil():
+    return datetime.now(pytz.timezone("America/Sao_Paulo")).date()
 
-opcoes_paginas = [
-    "✍️ Criar Novo Orçamento",
-    "🔍 Buscar e Histórico",
-]
 
-if "pagina_ativa" not in st.session_state:
-    st.session_state.pagina_ativa = opcoes_paginas[0]
+def estado_inicial():
+    return {
+        "pagina_ativa": OPCOES_PAGINAS[0], "carrinho": [], "item_counter": 0,
+        "cliente_input": "", "data_entrega_input": hoje_brasil(),
+        "desconto_geral": "", "observacao": "",
+        "embalagem_pedido": {"descricao": "", "valor": 0.0},
+        "embalagens_especiais": [], "adicionais": [],
+        "emb_pedido_desc_input": "", "emb_pedido_valor_input": 0.0,
+        "editando_id": None, "editando_numero": None, "ultimo_resultado": None,
+    }
 
-st.radio(
-    "Navegação",
-    opcoes_paginas,
-    key="pagina_ativa",
-    horizontal=True,
-    label_visibility="collapsed",
-)
 
-if "carrinho" not in st.session_state:
-    st.session_state.carrinho = []
-if "item_counter" not in st.session_state:
-    st.session_state.item_counter = 0
-if "desconto_geral" not in st.session_state:
-    st.session_state.desconto_geral = ""
-if "embalagem_pedido" not in st.session_state:
-    st.session_state.embalagem_pedido = {"descricao": "", "valor": 0.0}
-if "embalagens_especiais" not in st.session_state:
-    st.session_state.embalagens_especiais = []
-if "adicionais" not in st.session_state:
-    st.session_state.adicionais = []
-if "observacao" not in st.session_state:
-    st.session_state.observacao = ""
-if "cliente_input" not in st.session_state:
-    st.session_state.cliente_input = ""
-if "data_entrega_input" not in st.session_state:
-    st.session_state.data_entrega_input = datetime.now().date()
-if "editando_id" not in st.session_state:
-    st.session_state.editando_id = None
-if "editando_numero" not in st.session_state:
-    st.session_state.editando_numero = None
+def limpar_widgets_itens():
+    for chave in list(st.session_state.keys()):
+        if chave.startswith(("edit_qtd_", "desc_item_", "preco_edit_", "peso_edit_", "unidade_edit_")):
+            del st.session_state[chave]
+
+
+def limpar_orcamento():
+    limpar_widgets_itens()
+    st.session_state.update(estado_inicial())
 
 
 def carregar_orcamento_para_edicao(orcamento):
-    """
-    Callback executado antes do novo ciclo do Streamlit.
-
-    Isso permite alterar valores ligados a widgets sem gerar:
-    StreamlitAPIException: session_state cannot be modified after widget creation.
-    """
+    limpar_widgets_itens()
     o = normalizar_orcamento(orcamento)
-
     try:
-        data_edicao = datetime.strptime(
-            str(o.get("data_entrega", ""))[:10],
-            "%Y-%m-%d",
-        ).date()
-    except Exception:
-        data_edicao = datetime.now().date()
+        data = datetime.strptime(str(o.get("data_entrega", ""))[:10], "%Y-%m-%d").date()
+    except ValueError:
+        data = hoje_brasil()
+    itens = [{**it, "id": uuid4().hex} for it in o["itens"] if isinstance(it, dict)]
+    embalagem = dict(o["embalagem_pedido"])
+    st.session_state.update({
+        "pagina_ativa": OPCOES_PAGINAS[0], "editando_id": o.get("id"),
+        "editando_numero": o["numero"], "cliente_input": str(o.get("cliente") or ""),
+        "data_entrega_input": data, "carrinho": itens, "item_counter": len(itens),
+        "desconto_geral": str(o.get("desconto_geral") or ""),
+        "observacao": str(o.get("observacao") or ""), "embalagem_pedido": embalagem,
+        "emb_pedido_desc_input": str(embalagem.get("descricao") or ""),
+        "emb_pedido_valor_input": float(embalagem.get("valor") or 0),
+        "embalagens_especiais": [dict(it) for it in o["embalagens_especiais"]],
+        "adicionais": [dict(it) for it in o["adicionais"]], "ultimo_resultado": None,
+    })
 
-    itens_edicao = []
-    for indice, item in enumerate(o.get("itens") or []):
-        if not isinstance(item, dict):
-            continue
 
-        item_copia = dict(item)
-        if not item_copia.get("id"):
-            item_copia["id"] = (
-                f"edit_{o.get('numero', 0)}_{indice + 1}"
-            )
-        itens_edicao.append(item_copia)
+def invalidar_imagem():
+    st.session_state.ultimo_resultado = None
 
-    st.session_state.editando_id = o.get("id")
-    st.session_state.editando_numero = int(o.get("numero", 0))
-    st.session_state.cliente_input = str(o.get("cliente") or "")
-    st.session_state.data_entrega_input = data_edicao
-    st.session_state.carrinho = itens_edicao
-    st.session_state.item_counter = len(itens_edicao)
-    st.session_state.desconto_geral = str(
-        o.get("desconto_geral") or ""
+
+def aplicar_preco_ninho(indice, chave):
+    item = st.session_state.carrinho[indice]
+    if item_eh_ninho_tematico(item):
+        item["preco_cento"] = float(st.session_state[chave])
+        item["preco_manual"] = True
+        invalidar_imagem()
+
+
+def sincronizar_peso(indice, item_id):
+    gramas = int(st.session_state.carrinho[indice]["gramas"])
+    st.session_state[f"peso_edit_kg_{item_id}"] = gramas / 1000
+    st.session_state[f"peso_edit_g_{item_id}"] = gramas
+
+
+def mostrar_resultado(resultado, chave):
+    st.image(resultado["imagem"])
+    c1, c2 = st.columns(2)
+    c1.download_button(
+        "📥 Baixar Orçamento", data=resultado["imagem"],
+        file_name=f"Docito_N{resultado['numero']:03d}_{resultado['cliente']}.png",
+        mime="image/png", key=f"download_{chave}",
     )
-    st.session_state.embalagem_pedido = dict(
-        o.get("embalagem_pedido")
-        or {"descricao": "", "valor": 0.0}
-    )
-    st.session_state.embalagens_especiais = list(
-        o.get("embalagens_especiais") or []
-    )
-    st.session_state.adicionais = list(
-        o.get("adicionais") or []
-    )
-    st.session_state.observacao = str(
-        o.get("observacao") or ""
-    )
+    with c2:
+        codificado = base64.b64encode(resultado["imagem"]).decode()
+        st.components.v1.html(f"""
+        <button onclick="copyImage()" style="width:100%;background:#d86a2b;color:white;border:0;padding:10px;border-radius:8px;cursor:pointer;font-weight:600;">📋 Copiar imagem</button>
+        <script>
+        async function copyImage() {{
+            try {{
+                const response = await fetch("data:image/png;base64,{codificado}");
+                const blob = await response.blob();
+                await navigator.clipboard.write([new ClipboardItem({{"image/png": blob}})]);
+                alert("Imagem copiada! Agora é só colar no WhatsApp.");
+            }} catch (err) {{
+                alert("Seu navegador pode não permitir copiar imagem. Use o botão de baixar.");
+            }}
+        }}
+        </script>
+        """, height=55)
 
-    # Troca automaticamente para a tela de criação/edição.
-    st.session_state.pagina_ativa = "✍️ Criar Novo Orçamento"
 
-
-# ABA 1: CRIAÇÃO DE NOVO ORÇAMENTO
-if st.session_state.pagina_ativa == "✍️ Criar Novo Orçamento":
+def tela_criacao():
     if st.session_state.editando_id:
-        st.info(
-            f"✏️ Editando o orçamento Nº "
-            f"{int(st.session_state.editando_numero):03d}. "
-            "O número será mantido."
-        )
-        if st.button("Cancelar edição e criar novo orçamento"):
-            st.session_state.editando_id = None
-            st.session_state.editando_numero = None
-            st.session_state.pagina_ativa = "✍️ Criar Novo Orçamento"
-            st.session_state.cliente_input = ""
-            st.session_state.data_entrega_input = datetime.now().date()
-            st.session_state.carrinho = []
-            st.session_state.item_counter = 0
-            st.session_state.desconto_geral = ""
-            st.session_state.embalagem_pedido = {
-                "descricao": "",
-                "valor": 0.0,
-            }
-            st.session_state.embalagens_especiais = []
-            st.session_state.adicionais = []
-            st.session_state.observacao = ""
-            st.rerun()
-
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        cliente = st.text_input(
-            "Nome da Cliente",
-            key="cliente_input",
-        )
-    with col_c2:
-        data_ent = st.date_input(
-            "Data da Entrega",
-            key="data_entrega_input",
-        )
-
+        st.info(f"✏️ Editando o orçamento Nº {int(st.session_state.editando_numero):03d}. O número será mantido.")
+        st.button("Cancelar edição e criar novo orçamento", on_click=limpar_orcamento)
+    c1, c2 = st.columns(2)
+    cliente = c1.text_input("Nome da Cliente", key="cliente_input", on_change=invalidar_imagem)
+    entrega = c2.date_input("Data da Entrega", key="data_entrega_input", on_change=invalidar_imagem)
     st.divider()
     st.subheader("Adicionar produtos")
-    produto_selecionado = st.selectbox("Produto", list(CATALOGO.keys()))
-    dados_produto = CATALOGO[produto_selecionado]
-
-    if dados_produto["tipo"] == "unitario":
-        c1, c2, c3, c4 = st.columns([3, 1, 1.3, 1])
-        with c1:
-            st.text_input("Tipo de cobrança", value="Por unidade", disabled=True, key="tipo_unitario")
-        with c2:
-            qtd_unit = st.number_input("Qtd", min_value=1, value=50, step=1)
-        with c3:
-            desconto_novo_item = st.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2", key="desc_item_unit")
-        with c4:
-            st.write(" ")
-            if st.button("➕ Adicionar produto"):
-                st.session_state.item_counter += 1
-                st.session_state.carrinho.append({
-                    "id": f"prod_{st.session_state.item_counter}",
-                    "produto": produto_selecionado,
-                    "tipo": "unitario",
-                    "qtd": int(qtd_unit),
-                    "preco_cento": dados_produto["preco_cento"],
-                    "preco_unitario": dados_produto.get("preco_unitario"),
-                    "conta_como_doce": dados_produto.get("conta_como_doce", True),
-                    "desconto": desconto_novo_item.strip(),
-                })
-                st.rerun()
+    nome = st.selectbox("Produto", list(CATALOGO))
+    produto = CATALOGO[nome]
+    preco = produto.get("preco_cento")
+    if nome == "Ninho Temático":
+        preco = st.number_input("Preço do cento — Ninho Temático (R$)", min_value=0.01, value=160.00, step=5.0, format="%.2f", key="preco_ninho_tematico")
+        st.caption(f"Valor por unidade: {formatar_real(preco / 100)}. Calculado proporcionalmente à quantidade.")
+    if produto["tipo"] == "unitario":
+        c1, c2, c3 = st.columns([2, 1, 2])
+        c1.text_input("Tipo de cobrança", value="Por unidade", disabled=True, key="tipo_unitario")
+        qtd = c2.number_input("Qtd", min_value=1, value=50, step=1, key="qtd_novo_unitario")
+        desc = c3.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2", key="desconto_novo_unitario")
+        if st.button("➕ Adicionar produto"):
+            st.session_state.carrinho.append({
+                "id": uuid4().hex, "produto": nome, "tipo": "unitario", "qtd": int(qtd),
+                "preco_cento": float(preco), "preco_unitario": produto.get("preco_unitario"),
+                "conta_como_doce": produto.get("conta_como_doce", True),
+                "preco_manual": nome == "Ninho Temático", "desconto": desc.strip(),
+            })
+            invalidar_imagem()
+            st.rerun()
     else:
-        c1, c2, c3, c4, c5 = st.columns([2.2, 1.2, 1.2, 1.3, 1])
-        with c1:
-            st.text_input("Tipo de cobrança", value=f"Por peso ({formatar_real(dados_produto['preco_kg'])}/kg)", disabled=True, key="tipo_kg")
-        with c2:
-            unidade_peso = st.selectbox("Unidade", ["kg", "g"], key="unidade_nova")
-        with c3:
-            if unidade_peso == "kg":
-                valor_peso = st.number_input("Quantidade", min_value=0.1, value=1.0, step=0.1, format="%.3f", key="peso_novo_kg")
-                gramas_item = int(round(valor_peso * 1000))
-            else:
-                valor_peso = st.number_input("Quantidade", min_value=100, value=1000, step=50, key="peso_novo_g")
-                gramas_item = int(valor_peso)
-        with c4:
-            desconto_novo_item = st.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2", key="desc_kg_novo")
-        with c5:
-            st.write(" ")
-            if st.button("➕ Adicionar produto em massa"):
-                st.session_state.item_counter += 1
-                st.session_state.carrinho.append({
-                    "id": f"prod_{st.session_state.item_counter}",
-                    "produto": produto_selecionado,
-                    "tipo": "kg",
-                    "gramas": int(gramas_item),
-                    "preco_kg": dados_produto["preco_kg"],
-                    "desconto": desconto_novo_item.strip(),
-                })
-                st.rerun()
-
+        c1, c2, c3, c4 = st.columns([2.2, 1, 1.2, 1.5])
+        c1.text_input("Tipo de cobrança", value=f"Por peso ({formatar_real(produto['preco_kg'])}/kg)", disabled=True, key="tipo_kg")
+        unidade = c2.selectbox("Unidade", ["kg", "g"], key="unidade_nova")
+        if unidade == "kg":
+            peso = c3.number_input("Quantidade", min_value=0.1, value=1.0, step=0.1, format="%.3f", key="peso_novo_kg")
+            gramas = int(round(peso * 1000))
+        else:
+            gramas = c3.number_input("Quantidade", min_value=100, value=1000, step=50, key="peso_novo_g")
+        desc = c4.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2", key="desconto_novo_kg")
+        if st.button("➕ Adicionar produto em massa"):
+            st.session_state.carrinho.append({"id": uuid4().hex, "produto": nome, "tipo": "kg", "gramas": int(gramas), "preco_kg": produto["preco_kg"], "desconto": desc.strip()})
+            invalidar_imagem()
+            st.rerun()
     st.divider()
     st.subheader("Embalagem do pedido (opcional)")
-    e1, e2, e3 = st.columns([3, 1.2, 1])
-    with e1:
-        emb_pedido_desc = st.text_input("Descrição da embalagem do pedido", value=st.session_state.embalagem_pedido["descricao"], placeholder="Ex.: Pote premium / Caixa especial")
-    with e2:
-        emb_pedido_valor = st.number_input("Valor", min_value=0.0, value=float(st.session_state.embalagem_pedido["valor"]), step=0.5, format="%.2f")
-    with e3:
-        st.write(" ")
-        if st.button("Salvar embalagem do pedido"):
-            st.session_state.embalagem_pedido = {
-                "descricao": emb_pedido_desc.strip(),
-                "valor": float(emb_pedido_valor),
-            }
-            st.rerun()
-
+    c1, c2 = st.columns([3, 1.2])
+    emb_desc = c1.text_input("Descrição da embalagem do pedido", placeholder="Ex.: Pote premium / Caixa especial", key="emb_pedido_desc_input")
+    emb_valor = c2.number_input("Valor", min_value=0.0, step=0.5, format="%.2f", key="emb_pedido_valor_input")
+    if st.button("Salvar embalagem do pedido"):
+        st.session_state.embalagem_pedido = {"descricao": emb_desc.strip(), "valor": float(emb_valor)}
+        invalidar_imagem()
+        st.rerun()
     st.divider()
     st.subheader("Embalagens especiais/unitárias (opcional)")
-    ee1, ee2, ee3, ee4 = st.columns([2.5, 1, 1.2, 1])
-    with ee1:
-        emb_esp_desc = st.text_input("Descrição", placeholder="Ex.: Caixa premium / Pote individual", key="emb_esp_desc")
-    with ee2:
-        emb_esp_qtd = st.number_input("Qtd", min_value=1, value=1, step=1, key="emb_esp_qtd")
-    with ee3:
-        emb_esp_valor = st.number_input("Valor unit.", min_value=0.0, value=0.0, step=0.5, format="%.2f", key="emb_esp_valor")
-    with ee4:
-        st.write(" ")
-        if st.button("➕ Adicionar embalagem especial"):
-            if emb_esp_desc.strip() and emb_esp_valor > 0:
-                st.session_state.embalagens_especiais.append({
-                    "descricao": emb_esp_desc.strip(),
-                    "qtd": int(emb_esp_qtd),
-                    "valor_unit": float(emb_esp_valor),
-                })
-                st.rerun()
-
-    if st.session_state.embalagens_especiais:
-        st.caption("Embalagens especiais adicionadas")
-        for i, emb in enumerate(st.session_state.embalagens_especiais):
-            c1, c2 = st.columns([5, 1])
-            total_emb = float(emb["qtd"]) * float(emb["valor_unit"])
-            c1.write(f"**{emb['qtd']}x {emb['descricao']}** — {formatar_real(total_emb)}")
-            if c2.button("❌", key=f"del_emb_{i}"):
-                st.session_state.embalagens_especiais.pop(i)
-                st.rerun()
-
+    c1, c2, c3 = st.columns([2.5, 1, 1.2])
+    emb_desc = c1.text_input("Descrição", placeholder="Ex.: Caixa premium / Pote individual", key="emb_esp_desc")
+    emb_qtd = c2.number_input("Qtd", min_value=1, value=1, step=1, key="emb_esp_qtd")
+    emb_valor = c3.number_input("Valor unit.", min_value=0.0, value=0.0, step=0.5, format="%.2f", key="emb_esp_valor")
+    if st.button("➕ Adicionar embalagem especial"):
+        if emb_desc.strip() and emb_valor > 0:
+            st.session_state.embalagens_especiais.append({"descricao": emb_desc.strip(), "qtd": int(emb_qtd), "valor_unit": float(emb_valor)})
+            invalidar_imagem()
+            st.rerun()
+        else:
+            st.warning("Informe a descrição e um valor maior que zero.")
+    for i, emb in enumerate(st.session_state.embalagens_especiais):
+        c1, c2 = st.columns([5, 1])
+        c1.write(f"**{emb['qtd']}x {emb['descricao']}** — {formatar_real(float(emb['qtd']) * float(emb['valor_unit']))}")
+        if c2.button("❌", key=f"del_emb_{i}"):
+            st.session_state.embalagens_especiais.pop(i)
+            invalidar_imagem()
+            st.rerun()
     st.divider()
     st.subheader("Adicionais (opcional)")
-    a1, a2, a3 = st.columns([3, 1.2, 1])
-    with a1:
-        adicional_desc = st.text_input("Descrição do adicional", placeholder="Ex.: Caixa extra / Taxa de entrega", key="adicional_desc")
-    with a2:
-        adicional_valor = st.number_input("Valor do adicional", min_value=0.0, value=0.0, step=0.5, format="%.2f", key="adicional_valor")
-    with a3:
-        st.write(" ")
-        if st.button("➕ Adicionar adicional"):
-            if adicional_desc.strip() and adicional_valor > 0:
-                st.session_state.adicionais.append({
-                    "descricao": adicional_desc.strip(),
-                    "valor": float(adicional_valor),
-                })
-                st.rerun()
-
-    if st.session_state.adicionais:
-        st.caption("Adicionais adicionados")
-        for i, ad in enumerate(st.session_state.adicionais):
-            c1, c2 = st.columns([5, 1])
-            c1.write(f"**{ad['descricao']}** — {formatar_real(float(ad['valor']))}")
-            if c2.button("❌", key=f"del_ad_{i}"):
-                st.session_state.adicionais.pop(i)
-                st.rerun()
-
+    c1, c2 = st.columns([3, 1.2])
+    ad_desc = c1.text_input("Descrição do adicional", placeholder="Ex.: Caixa extra / Taxa de entrega", key="adicional_desc")
+    ad_valor = c2.number_input("Valor do adicional", min_value=0.0, value=0.0, step=0.5, format="%.2f", key="adicional_valor")
+    if st.button("➕ Adicionar adicional"):
+        if ad_desc.strip() and ad_valor > 0:
+            st.session_state.adicionais.append({"descricao": ad_desc.strip(), "valor": float(ad_valor)})
+            invalidar_imagem()
+            st.rerun()
+        else:
+            st.warning("Informe a descrição e um valor maior que zero.")
+    for i, ad in enumerate(st.session_state.adicionais):
+        c1, c2 = st.columns([5, 1])
+        c1.write(f"**{ad['descricao']}** — {formatar_real(float(ad['valor']))}")
+        if c2.button("❌", key=f"del_ad_{i}"):
+            st.session_state.adicionais.pop(i)
+            invalidar_imagem()
+            st.rerun()
     st.divider()
     st.subheader("Observação (opcional)")
-    observacao = st.text_area("Observação do orçamento", value=st.session_state.observacao, placeholder="Ex.: Produto enviado em embalagem especial para consumo de colher.")
-    st.session_state.observacao = observacao
-
+    st.text_area("Observação do orçamento", key="observacao", placeholder="Ex.: Produto enviado em embalagem especial para consumo de colher.", on_change=invalidar_imagem)
     st.divider()
     st.subheader("Desconto geral do pedido")
-    desconto_geral = st.text_input("Desconto Geral", value=st.session_state.desconto_geral, placeholder="Ex.: 10% ou R$20")
-    st.session_state.desconto_geral = desconto_geral
-
-    tem_conteudo = (
-        st.session_state.carrinho
-        or (st.session_state.embalagem_pedido.get("descricao", "").strip() and st.session_state.embalagem_pedido.get("valor", 0) > 0)
-        or st.session_state.embalagens_especiais
-        or st.session_state.adicionais
-    )
-
-    if tem_conteudo:
-        st.subheader("🛒 Itens Selecionados")
-        st.caption("✅ Tabela progressiva V7 ativa — faixa calculada pelo total de doces do pedido")
-        total_bruto_preview_itens = 0
-        total_desc_itens_preview = 0
-        total_doces_preview = calcular_total_doces_pedido(st.session_state.carrinho)
-        total_gramas_preview = 0
-
-        for i, item in enumerate(st.session_state.carrinho):
-            subtotal_bruto, desconto_item_valor, _, subtotal_final = calcular_subtotal_item(
-                item, total_doces_preview
-            )
-            total_bruto_preview_itens += subtotal_bruto
-            total_desc_itens_preview += desconto_item_valor
-            item_id = item.get("id", f"fallback_{i}")
-
-            if item["tipo"] == "unitario":
-                col_prod, col_qtd, col_desc, col_bt = st.columns([3, 1, 1.4, 0.5])
-                col_prod.write(f"**{item['produto']}**  \n{item['qtd']}un | {formatar_real(subtotal_bruto)} → **{formatar_real(subtotal_final)}**")
-                nova_qtd = col_qtd.number_input("Qtd", min_value=1, value=int(item["qtd"]), key=f"edit_qtd_{item_id}", label_visibility="collapsed")
-                novo_desc = col_desc.text_input("Desconto", value=item.get("desconto", ""), key=f"desc_{item_id}", placeholder="10% ou R$2", label_visibility="collapsed")
-                
-                alterou = False
-                if nova_qtd != item["qtd"]:
-                    st.session_state.carrinho[i]["qtd"] = int(nova_qtd)
-                    alterou = True
-                if novo_desc != item.get("desconto", ""):
-                    st.session_state.carrinho[i]["desconto"] = novo_desc.strip()
-                    alterou = True
-                if alterou:
-                    st.rerun()
-                if col_bt.button("❌", key=f"del_{item_id}"):
-                    st.session_state.carrinho.pop(i)
-                    st.rerun()
-            else:
-                total_gramas_preview += item["gramas"]
-                col_prod, col_unid, col_qtd, col_desc, col_bt = st.columns([2.4, 1, 1.2, 1.4, 0.5])
-                col_prod.write(f"**{item['produto']}**  \n{formatar_peso(item['gramas'])} | {formatar_real(subtotal_bruto)} → **{formatar_real(subtotal_final)}**")
-                unidade_edit = col_unid.selectbox("Unidade", ["kg", "g"], index=0 if item["gramas"] % 1000 == 0 else 1, key=f"unidade_edit_{item_id}", label_visibility="collapsed")
-                
-                if unidade_edit == "kg":
-                    valor_padrao = item["gramas"] / 1000
-                    novo_valor_peso = col_qtd.number_input("Quantidade", min_value=0.1, value=float(valor_padrao), step=0.1, format="%.3f", key=f"peso_kg_{item_id}", label_visibility="collapsed")
-                    novas_gramas = int(round(novo_valor_peso * 1000))
+    st.text_input("Desconto Geral", key="desconto_geral", placeholder="Ex.: 10% ou R$20", on_change=invalidar_imagem)
+    tem_conteudo = st.session_state.carrinho or calcular_total_embalagens_pedido(st.session_state.embalagem_pedido) > 0 or st.session_state.embalagens_especiais or st.session_state.adicionais
+    if not tem_conteudo:
+        return
+    st.subheader("🛒 Itens Selecionados")
+    st.caption("A faixa dos doces usa a quantidade total do pedido. O Ninho Temático com preço personalizado usa o valor informado.")
+    total_doces = calcular_total_doces_pedido(st.session_state.carrinho)
+    for i, item in enumerate(st.session_state.carrinho):
+        if not item.get("id"):
+            item["id"] = uuid4().hex
+        item_id = item["id"]
+        bruto, _, _, final = calcular_subtotal_item(item, total_doces)
+        alterou = False
+        if item["tipo"] == "unitario":
+            c1, c2, c3, c4 = st.columns([3, 1, 1.4, 0.5])
+            c1.write(f"**{item['produto']}**  \n{item['qtd']}un | {formatar_real(bruto)} → **{formatar_real(final)}**")
+            qtd = c2.number_input("Qtd", min_value=1, value=int(item["qtd"]), key=f"edit_qtd_{item_id}", label_visibility="collapsed")
+            desc = c3.text_input("Desconto", value=item.get("desconto", ""), key=f"desc_item_{item_id}", placeholder="10% ou R$2", label_visibility="collapsed")
+            if qtd != item["qtd"]:
+                item["qtd"] = int(qtd)
+                alterou = True
+            if item_eh_ninho_tematico(item):
+                chave = f"preco_edit_{item_id}"
+                st.number_input("Preço do cento deste Ninho Temático (R$)", min_value=0.01, value=float(item.get("preco_cento", 160)), step=5.0, format="%.2f", key=chave, on_change=aplicar_preco_ninho, args=(i, chave))
+                if item.get("preco_manual", False):
+                    st.caption(f"Preço personalizado: {formatar_real(float(item['preco_cento']))} o cento.")
                 else:
-                    novo_valor_peso = col_qtd.number_input("Quantidade", min_value=100, value=int(item["gramas"]), step=50, key=f"peso_g_{item_id}", label_visibility="collapsed")
-                    novas_gramas = int(novo_valor_peso)
-
-                novo_desc = col_desc.text_input("Desconto", value=item.get("desconto", ""), key=f"desc_kg_{item_id}", placeholder="10% ou R$2", label_visibility="collapsed")
-                
-                alterou = False
-                if novas_gramas != item["gramas"]:
-                    st.session_state.carrinho[i]["gramas"] = int(novas_gramas)
-                    alterou = True
-                if novo_desc != item.get("desconto", ""):
-                    st.session_state.carrinho[i]["desconto"] = novo_desc.strip()
-                    alterou = True
-                if alterou:
-                    st.rerun()
-                if col_bt.button("❌", key=f"del_kg_{item_id}"):
-                    st.session_state.carrinho.pop(i)
-                    st.rerun()
-
-        total_emb_pedido_preview = calcular_total_embalagens_pedido(st.session_state.embalagem_pedido)
-        total_emb_especiais_preview = calcular_total_embalagens_especiais(st.session_state.embalagens_especiais)
-        total_adicionais_preview = calcular_total_adicionais(st.session_state.adicionais)
-
-        total_bruto_preview = total_bruto_preview_itens + total_emb_pedido_preview + total_emb_especiais_preview + total_adicionais_preview
-        total_apos_itens_preview = total_bruto_preview - total_desc_itens_preview
-        desconto_geral_preview, _ = calcular_desconto(total_apos_itens_preview, st.session_state.desconto_geral)
-        total_final_preview = total_apos_itens_preview - desconto_geral_preview
-
-        st.divider()
-        st.subheader("Resumo")
-
-        if total_doces_preview > 0:
-            st.write(f"**Total de doces:** {total_doces_preview}")
-        if total_gramas_preview > 0:
-            st.write(f"**Peso total:** {formatar_peso(total_gramas_preview)}")
-        if total_emb_pedido_preview > 0:
-            st.write(f"**Embalagem do pedido:** {formatar_real(total_emb_pedido_preview)}")
-        if total_emb_especiais_preview > 0:
-            st.write(f"**Embalagens especiais:** {formatar_real(total_emb_especiais_preview)}")
-        if total_adicionais_preview > 0:
-            st.write(f"**Adicionais:** {formatar_real(total_adicionais_preview)}")
-
-        st.write(f"**Subtotal:** {formatar_real(total_bruto_preview)}")
-        if total_desc_itens_preview > 0:
-            st.write(f"**Desconto por itens:** -{formatar_real(total_desc_itens_preview)}")
-        if desconto_geral_preview > 0:
-            st.write(f"**Desconto geral:** -{formatar_real(desconto_geral_preview)}")
-        if st.session_state.observacao.strip():
-            st.write(f"**Observação:** {st.session_state.observacao.strip()}")
-
-        st.write(f"## Total final: {formatar_real(total_final_preview)}")
-
-        if st.button("LIMPAR TUDO", type="secondary"):
-            st.session_state.carrinho = []
-            st.session_state.item_counter = 0
-            st.session_state.desconto_geral = ""
-            st.session_state.embalagem_pedido = {
-                "descricao": "",
-                "valor": 0.0,
-            }
-            st.session_state.embalagens_especiais = []
-            st.session_state.adicionais = []
-            st.session_state.observacao = ""
-            st.session_state.cliente_input = ""
-            st.session_state.data_entrega_input = datetime.now().date()
-            st.session_state.editando_id = None
-            st.session_state.editando_numero = None
-            st.rerun()
-
-        texto_botao_salvar = (
-            "SALVAR ALTERAÇÕES E GERAR IMAGEM"
-            if st.session_state.editando_id
-            else "GERAR IMAGEM FINAL"
-        )
-
-        if st.button(
-            texto_botao_salvar,
-            type="primary",
-            use_container_width=True,
-        ):
-            if cliente.strip():
-                modo_edicao = bool(st.session_state.editando_id)
-
-                with st.spinner(
-                    "Atualizando orçamento no Supabase..."
-                    if modo_edicao
-                    else "Gerando e salvando orçamento no Supabase..."
-                ):
-                    if modo_edicao:
-                        numero_orcamento = int(
-                            st.session_state.editando_numero
-                        )
-                    else:
-                        try:
-                            numero_orcamento = obter_proximo_numero()
-                        except Exception as e:
-                            st.error(str(e))
-                            st.stop()
-
-                    res = gerar_imagem(
-                        cliente=cliente,
-                        data_entrega=data_ent,
-                        itens=st.session_state.carrinho,
-                        numero_orcamento=numero_orcamento,
-                        desconto_geral_str=st.session_state.desconto_geral,
-                        embalagem_pedido=st.session_state.embalagem_pedido,
-                        embalagens_especiais=(
-                            st.session_state.embalagens_especiais
-                        ),
-                        adicionais=st.session_state.adicionais,
-                        observacao=st.session_state.observacao,
-                    )
-
-                    registro = {
-                        "numero": int(numero_orcamento),
-                        "cliente": cliente.strip(),
-                        "data_entrega": data_ent.isoformat(),
-                        "desconto_geral": (
-                            st.session_state.desconto_geral.strip()
-                        ),
-                        "embalagem_pedido": dict(
-                            st.session_state.embalagem_pedido
-                        ),
-                        "embalagens_especiais": list(
-                            st.session_state.embalagens_especiais
-                        ),
-                        "adicionais": list(
-                            st.session_state.adicionais
-                        ),
-                        "observacao": (
-                            st.session_state.observacao.strip()
-                        ),
-                        "itens": list(st.session_state.carrinho),
-                        "total": round(float(total_final_preview), 2),
-                    }
-
-                    if modo_edicao:
-                        sucesso = atualizar_orcamento_supabase(
-                            st.session_state.editando_id,
-                            registro,
-                        )
-                    else:
-                        sucesso = salvar_orcamento_supabase(registro)
-
-                    if sucesso:
-                        mensagem = (
-                            f"Orçamento Nº {numero_orcamento:03d} atualizado!"
-                            if modo_edicao
-                            else f"Orçamento Nº {numero_orcamento:03d} arquivado!"
-                        )
-                        st.success(mensagem)
-                        st.image(res)
-
-                        col_b1, col_b2 = st.columns(2)
-                        with col_b1:
-                            st.download_button(
-                                "📥 Baixar Orçamento",
-                                res,
-                                (
-                                    f"Docito_N{numero_orcamento:03d}_"
-                                    f"{cliente.strip()}.png"
-                                ),
-                                "image/png",
-                                key=f"download_atual_{numero_orcamento}",
-                            )
-                        with col_b2:
-                            img_base64 = base64.b64encode(
-                                res.getvalue()
-                            ).decode()
-                            copy_script = f"""
-                            <button onclick="copyImage()" style="
-                                width: 100%;
-                                background-color: #d86a2b;
-                                color: white;
-                                border: none;
-                                padding: 0.6rem 1rem;
-                                border-radius: 0.5rem;
-                                cursor: pointer;
-                                font-size: 14px;
-                                font-weight: 600;
-                            ">
-                                📋 Copiar imagem
-                            </button>
-                            <script>
-                            async function copyImage() {{
-                                try {{
-                                    const response = await fetch(
-                                        "data:image/png;base64,{img_base64}"
-                                    );
-                                    const blob = await response.blob();
-                                    const item = new ClipboardItem(
-                                        {{"image/png": blob}}
-                                    );
-                                    await navigator.clipboard.write([item]);
-                                    alert(
-                                        "Imagem copiada! Agora é só colar "
-                                        + "no WhatsApp."
-                                    );
-                                }} catch (err) {{
-                                    alert(
-                                        "Seu navegador pode não permitir "
-                                        + "copiar imagem diretamente. "
-                                        + "Use o botão de baixar."
-                                    );
-                                }}
-                            }}
-                            </script>
-                            """
-                            st.components.v1.html(copy_script, height=55)
-
-                        if modo_edicao:
-                            st.session_state.editando_id = None
-                            st.session_state.editando_numero = None
-            else:
-                st.warning("Por favor, preencha o nome da cliente!")
-
-# ABA 2: HISTÓRICO E BUSCA DE ORÇAMENTOS
-if st.session_state.pagina_ativa == "🔍 Buscar e Histórico":
-    st.subheader("📚 Histórico de Orçamentos Arquivados")
-
-    if st.session_state.editando_id:
-        st.success(
-            f"O orçamento Nº "
-            f"{int(st.session_state.editando_numero):03d} foi carregado. "
-            "Abra a aba “Criar Novo Orçamento” para editar."
-        )
-    
-    # Puxa os dados direto do Supabase em tempo real
-    historico_salvo = carregar_historico_supabase()
-
-    if not historico_salvo:
-        st.info("Nenhum orçamento encontrado no Supabase.")
-    else:
-        termo_busca = st.text_input("Buscar por número ou nome do cliente", placeholder="Ex.: 1 ou Maria")
-
-        orcamentos_filtrados = []
-        for o in historico_salvo:
-            if termo_busca.strip():
-                if termo_busca.strip().isdigit() and int(termo_busca.strip()) == o["numero"]:
-                    orcamentos_filtrados.append(o)
-                elif termo_busca.lower() in o.get("cliente", "").lower():
-                    orcamentos_filtrados.append(o)
-            else:
-                orcamentos_filtrados.append(o)
-
-        if not orcamentos_filtrados:
-            st.warning("Nenhum registro encontrado para essa pesquisa.")
+                    st.caption("Este item antigo ainda usa a tabela progressiva. Ao alterar o preço acima, passa a usar preço proporcional.")
         else:
-            for o in reversed(orcamentos_filtrados):
-                with st.expander(f"📋 Nº {o['numero']:03d} — {o['cliente'].upper()} | Total: {formatar_real(o['total'])}"):
-                    st.write(f"**Data de Entrega:** {o['data_entrega']}")
-                    if o.get("observacao", "").strip():
-                        st.write(f"**Observação:** {o['observacao']}")
+            c1, unidade_col, c2, c3, c4 = st.columns([2.4, 1, 1.2, 1.4, 0.5])
+            c1.write(f"**{item['produto']}**  \n{formatar_peso(item['gramas'])} | {formatar_real(bruto)} → **{formatar_real(final)}**")
+            unidade = unidade_col.selectbox("Unidade", ["kg", "g"], index=0 if item["gramas"] % 1000 == 0 else 1, key=f"unidade_edit_{item_id}", label_visibility="collapsed", on_change=sincronizar_peso, args=(i, item_id))
+            if unidade == "kg":
+                peso = c2.number_input("Quantidade", min_value=0.1, value=float(item["gramas"] / 1000), step=0.1, format="%.3f", key=f"peso_edit_kg_{item_id}", label_visibility="collapsed")
+                gramas = int(round(peso * 1000))
+            else:
+                gramas = c2.number_input("Quantidade", min_value=100, value=int(item["gramas"]), step=50, key=f"peso_edit_g_{item_id}", label_visibility="collapsed")
+            desc = c3.text_input("Desconto", value=item.get("desconto", ""), key=f"desc_item_{item_id}", placeholder="10% ou R$2", label_visibility="collapsed")
+            if gramas != item["gramas"]:
+                item["gramas"] = int(gramas)
+                alterou = True
+        if desc.strip() != item.get("desconto", ""):
+            item["desconto"] = desc.strip()
+            alterou = True
+        if c4.button("❌", key=f"del_item_{item_id}"):
+            st.session_state.carrinho.pop(i)
+            invalidar_imagem()
+            st.rerun()
+        if alterou:
+            invalidar_imagem()
+            st.rerun()
+    r = calcular_resumo(st.session_state.carrinho, st.session_state.embalagem_pedido, st.session_state.embalagens_especiais, st.session_state.adicionais, st.session_state.desconto_geral)
+    st.divider()
+    st.subheader("Resumo")
+    if r["total_doces"] > 0:
+        st.write(f"**Total de doces:** {r['total_doces']}")
+    if r["total_gramas"] > 0:
+        st.write(f"**Peso total:** {formatar_peso(r['total_gramas'])}")
+    for campo, titulo in (("total_emb_pedido", "Embalagem do pedido"), ("total_emb_especiais", "Embalagens especiais"), ("total_adicionais", "Adicionais")):
+        if r[campo] > 0:
+            st.write(f"**{titulo}:** {formatar_real(r[campo])}")
+    st.write(f"**Subtotal:** {formatar_real(r['subtotal'])}")
+    for campo, titulo in (("desconto_itens", "Desconto por itens"), ("desconto_geral", "Desconto geral")):
+        if r[campo] > 0:
+            st.write(f"**{titulo}:** -{formatar_real(r[campo])}")
+    if st.session_state.observacao.strip():
+        st.write(f"**Observação:** {st.session_state.observacao.strip()}")
+    st.write(f"## Total final: {formatar_real(r['total'])}")
+    st.button("LIMPAR TUDO", type="secondary", on_click=limpar_orcamento)
+    registro_atual = {
+        "cliente": cliente.strip(), "data_entrega": entrega.isoformat(),
+        "desconto_geral": st.session_state.desconto_geral.strip(),
+        "embalagem_pedido": dict(st.session_state.embalagem_pedido),
+        "embalagens_especiais": [dict(it) for it in st.session_state.embalagens_especiais],
+        "adicionais": [dict(it) for it in st.session_state.adicionais],
+        "observacao": st.session_state.observacao.strip(),
+        "itens": [dict(it) for it in st.session_state.carrinho], "total": round(float(r["total"]), 2),
+    }
+    botao = "SALVAR ALTERAÇÕES E GERAR IMAGEM" if st.session_state.editando_id else "GERAR IMAGEM FINAL"
+    if st.button(botao, type="primary", use_container_width=True):
+        if not cliente.strip():
+            st.warning("Por favor, preencha o nome da cliente!")
+        else:
+            modo_edicao = bool(st.session_state.editando_id)
+            with st.spinner("Gerando e salvando orçamento no Supabase..."):
+                try:
+                    numero = int(st.session_state.editando_numero) if modo_edicao else obter_proximo_numero()
+                    imagem = gerar_imagem(cliente, entrega, st.session_state.carrinho, numero, st.session_state.desconto_geral, st.session_state.embalagem_pedido, st.session_state.embalagens_especiais, st.session_state.adicionais, st.session_state.observacao)
+                    registro = {"numero": numero, **registro_atual}
+                    salvo = atualizar_orcamento_supabase(st.session_state.editando_id, registro) if modo_edicao else salvar_orcamento_supabase(registro)
+                except Exception as e:
+                    st.error(f"Não foi possível gerar o orçamento: {e}")
+                    salvo = None
+                if salvo is not None:
+                    st.session_state.editando_id = salvo.get("id") or st.session_state.editando_id
+                    st.session_state.editando_numero = numero
+                    st.session_state.ultimo_resultado = {
+                        "imagem": imagem.getvalue(), "numero": numero, "cliente": cliente.strip(),
+                        "registro": registro_atual,
+                        "mensagem": f"Orçamento Nº {numero:03d} {'atualizado' if modo_edicao else 'arquivado'}!",
+                    }
+                    st.rerun()
+    resultado = st.session_state.ultimo_resultado
+    if resultado and resultado.get("registro") == registro_atual:
+        st.success(resultado["mensagem"])
+        mostrar_resultado(resultado, "atual")
 
-                    st.caption("Resumo dos Itens do Pedido:")
-                    for it in o.get("itens", []):
-                        if not isinstance(it, dict):
-                            continue
-                        if it.get("tipo") == "unitario":
-                            st.write(
-                                f"• {int(it.get('qtd', 0))}un de "
-                                f"{it.get('produto', 'Produto')}"
-                            )
-                        else:
-                            st.write(
-                                f"• {formatar_peso(int(it.get('gramas', 0)))} de "
-                                f"{it.get('produto', 'Produto')}"
-                            )
 
-                    col_editar, col_visualizar = st.columns(2)
+def tela_historico():
+    st.subheader("📚 Histórico de Orçamentos Arquivados")
+    historico = carregar_historico_supabase()
+    if not historico:
+        st.info("Nenhum orçamento encontrado no Supabase.")
+        return
+    busca = st.text_input("Buscar por número ou nome do cliente", placeholder="Ex.: 234 ou Maria").strip()
+    filtrados = [o for o in historico if not busca or (busca.isdigit() and int(busca) == o["numero"]) or busca.casefold() in str(o.get("cliente", "")).casefold()]
+    if not filtrados:
+        st.warning("Nenhum registro encontrado para essa pesquisa.")
+    for o in filtrados:
+        identificador = str(o.get("id") or o["numero"])
+        with st.expander(f"📋 Nº {o['numero']:03d} — {str(o.get('cliente', '')).upper()} | Total: {formatar_real(o['total'])}"):
+            st.write(f"**Data de Entrega:** {o['data_entrega']}")
+            if str(o.get("observacao") or "").strip():
+                st.write(f"**Observação:** {o['observacao']}")
+            st.caption("Resumo dos Itens do Pedido:")
+            for item in o["itens"]:
+                if not isinstance(item, dict):
+                    continue
+                st.write("• " + gerar_texto_item(item))
+                if item_eh_ninho_tematico(item) and item.get("preco_manual", False):
+                    st.caption(f"Preço personalizado: {formatar_real(float(item['preco_cento']))} o cento.")
+            c1, c2 = st.columns(2)
+            c1.button(f"✏️ Editar Nº {o['numero']:03d}", key=f"editar_{identificador}", use_container_width=True, on_click=carregar_orcamento_para_edicao, args=(o,))
+            chave = f"visualizando_{identificador}"
+            if c2.button(f"🖼️ Visualizar Nº {o['numero']:03d}", key=f"visualizar_{identificador}", use_container_width=True):
+                st.session_state[chave] = True
+            if st.session_state.get(chave, False):
+                try:
+                    entrega = datetime.strptime(str(o["data_entrega"])[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    entrega = hoje_brasil()
+                try:
+                    imagem = gerar_imagem(o["cliente"], entrega, o["itens"], o["numero"], o.get("desconto_geral", ""), o["embalagem_pedido"], o["embalagens_especiais"], o["adicionais"], o.get("observacao", ""))
+                    mostrar_resultado({"imagem": imagem.getvalue(), "numero": o["numero"], "cliente": o["cliente"]}, identificador)
+                except Exception as e:
+                    st.error(f"Não foi possível visualizar este orçamento: {e}")
 
-                    col_editar.button(
-                        f"✏️ Editar Nº {o['numero']:03d}",
-                        key=f"editar_{o.get('id', o['numero'])}",
-                        use_container_width=True,
-                        on_click=carregar_orcamento_para_edicao,
-                        args=(o,),
-                    )
 
-                    if col_visualizar.button(
-                        f"🖼️ Visualizar Nº {o['numero']:03d}",
-                        key=f"regerar_{o.get('id', o['numero'])}",
-                        use_container_width=True,
-                    ):
-                        try:
-                            dt_ent_antigo = datetime.strptime(
-                                str(o["data_entrega"])[:10],
-                                "%Y-%m-%d",
-                            ).date()
-                        except Exception:
-                            dt_ent_antigo = datetime.now().date()
+def main():
+    global supabase
+    st.set_page_config(page_title="Docito Doceria - Orçamentos", page_icon="🍰")
+    try:
+        supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+    except Exception as e:
+        st.error("Erro ao conectar ao Supabase. Confira SUPABASE_URL e SUPABASE_KEY nos Secrets do Streamlit.")
+        st.exception(e)
+        st.stop()
+    for chave, valor in estado_inicial().items():
+        if chave not in st.session_state:
+            st.session_state[chave] = valor
+    if (BASE_DIR / "logo.png").exists():
+        st.image(str(BASE_DIR / "logo.png"), width=100)
+    else:
+        st.title("🍰 DOCITO DOCERIA")
+    st.title("Gerador de Orçamentos")
+    st.caption("V8 — Ninho Temático com preço personalizado")
+    st.radio("Navegação", OPCOES_PAGINAS, key="pagina_ativa", horizontal=True, label_visibility="collapsed")
+    if st.session_state.pagina_ativa == OPCOES_PAGINAS[0]:
+        tela_criacao()
+    else:
+        tela_historico()
 
-                        with st.spinner(
-                            "Buscando e renderizando dados do Supabase..."
-                        ):
-                            res_antigo = gerar_imagem(
-                                cliente=o["cliente"],
-                                data_entrega=dt_ent_antigo,
-                                itens=o["itens"],
-                                numero_orcamento=o["numero"],
-                                desconto_geral_str=o.get(
-                                    "desconto_geral",
-                                    "",
-                                ),
-                                embalagem_pedido=o.get(
-                                    "embalagem_pedido"
-                                ),
-                                embalagens_especiais=o.get(
-                                    "embalagens_especiais"
-                                ),
-                                adicionais=o.get("adicionais"),
-                                observacao=o.get("observacao", ""),
-                            )
-                            st.image(res_antigo)
-                            st.download_button(
-                                "📥 Baixar este Orçamento",
-                                res_antigo,
-                                (
-                                    f"Docito_N{o['numero']:03d}_"
-                                    f"{o['cliente']}.png"
-                                ),
-                                "image/png",
-                                key=(
-                                    f"dl_antigo_"
-                                    f"{o.get('id', o['numero'])}"
-                                ),
-                            )
-                            st.image(res_antigo)
-                            st.download_button(
-                                "📥 Baixar este Orçamento",
-                                res_antigo,
-                                f"Docito_N{o['numero']:03d}_{o['cliente']}.png",
-                                "image/png",
-                                key=f"dl_antigo_{o['numero']}_sup",
-                            )
+
+if __name__ == "__main__":
+    main()
