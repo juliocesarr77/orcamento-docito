@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Docito · Montagem</title>
+<link rel="stylesheet" href="editor.css">
+</head>
+<body>
+<header class="top brand-header">
+  <div class="brand-lockup">
+    <img src="logo-docito.png" alt="Docito Doceria">
+    <div>
+      <h1>Projetos Docito</h1>
+      <p>Montagem de doces personalizados</p>
+    </div>
+  </div>
+  <div class="actions top-actions">
+    <button id="undo">Desfazer</button><button id="redo">Refazer</button>
+    <button id="save" class="primary">Salvar versão</button>
+    <button id="png">Exportar PNG</button>
+    <button id="pdf" class="pdf-action">Exportar PDF</button>
+  </div>
+</header>
+<div id="notice" class="status" role="status">Monte seu projeto: escolha a base, selecione uma arte ou ejetor e organize os doces na caixa.</div>
+<nav class="mobile-nav" aria-label="Áreas do editor">
+  <button data-pane="box" aria-pressed="true">Caixa</button>
+  <button data-pane="library" aria-pressed="false">Artes</button>
+  <button data-pane="settings" aria-pressed="false">Ajustar</button>
+</nav>
+<div class="layout">
+  <aside class="panel" id="libraryPanel">
+    <h2><span class="step">1</span> Brigadeiro de referência</h2>
+    <button id="plainBase" class="base-choice active-choice" type="button">
+      <span class="base-dot"></span><strong>Branquinho</strong><small>Base redonda para a montagem</small>
+    </button>
+    <label for="baseColor">Cor do brigadeiro</label>
+    <input id="baseColor" type="color" value="#fff7e6">
+    <div class="color-presets" aria-label="Cores rápidas">
+      <button type="button" data-color="#fff7e6" title="Branco"></button>
+      <button type="button" data-color="#f4b7c9" title="Rosa"></button>
+      <button type="button" data-color="#b8d9ef" title="Azul"></button>
+      <button type="button" data-color="#c9dfb4" title="Verde"></button>
+      <button type="button" data-color="#f6dc91" title="Amarelo"></button>
+      <button type="button" data-color="#d8c0e8" title="Lilás"></button>
+    </div>
+
+    <hr>
+    <h2><span class="step">2</span> Arte / carimbo</h2>
+    <input id="search" placeholder="Pesquisar pelo nome…" aria-label="Pesquisar arte pelo nome">
+    <div class="library-filters" role="tablist" aria-label="Filtrar biblioteca">
+      <button type="button" id="filterAll" data-filter="all" aria-pressed="true">Todos</button>
+      <button type="button" id="filterArt" data-filter="art" aria-pressed="false">Artes</button>
+      <button type="button" id="filterEjetor" data-filter="ejetor" aria-pressed="false">Ejetores</button>
+    </div>
+    <div class="actions compact"><button id="noArt" type="button">Sem arte</button><button id="import" class="primary" type="button">+ Enviar arte / ejetor</button></div>
+    <div class="catalog" id="catalog"></div>
+    <p class="muted">Os uploads ficam na biblioteca, continuam pesquisáveis por nome e também são guardados no projeto.</p>
+  </aside>
+
+  <main class="panel" id="boxPanel">
+    <h2><span class="step">3</span> Montagem da caixa</h2>
+    <div class="pair">
+      <div><label for="client">Cliente</label><input id="client" placeholder="Nome da cliente"></div>
+      <div><label for="theme">Tema do projeto</label><input id="theme" placeholder="Ex.: Jardim, futebol, princesa"></div>
+    </div>
+    <div class="row">
+      <div style="flex:1"><label for="format">Caixa: colunas × linhas</label><select id="format"><option value="7,7">7 × 7 · 49 doces</option><option value="10,5" selected>10 × 5 · 50 doces</option><option value="10,10">10 × 10 · 100 doces</option></select></div>
+      <div style="width:120px"><label for="quantity">Total do pedido</label><input id="quantity" type="number" min="1" max="1000" value="50"></div>
+    </div>
+    <label for="mode">Ao clicar na caixa</label>
+    <select id="mode"><option value="place">Colocar doce atual</option><option value="drag">Arrastar / reorganizar doces</option><option value="select">Selecionar posições</option><option value="erase">Retirar doce</option><option value="lock">Fixar / liberar posição</option></select>
+    <div class="actions" style="margin-top:10px"><button id="line">Preencher linha</button><button id="column">Preencher coluna</button><button id="selected">Preencher seleção</button><button id="empty">Preencher vazias</button><button id="deselect">Limpar seleção</button></div>
+    <div class="stats" id="stats"></div>
+    <div class="row zoom-controls"><button id="fitTray" aria-pressed="true">Ver caixa inteira</button><button id="zoomTray" aria-pressed="false">Ampliar para tocar</button></div>
+    <div class="work"><canvas id="tray" width="1400" height="700" aria-label="Caixa de doces"></canvas></div>
+    <div class="row"><label>Posição <input id="position" type="number" min="1" value="1" style="width:90px"></label><button id="placePosition">Aplicar nessa posição</button><button id="editPosition">Carregar doce para editar</button></div>
+    <small>Borda rosa: seleção. Marcador escuro: posição fixa. No modo arrastar, mova um doce para outra posição da caixa. As marcações não aparecem na exportação.</small>
+    <details><summary>Distribuir quantidades</summary><p class="muted">Monte cada doce, adicione-o à lista com sua quantidade e distribua alternadamente.</p><div class="actions"><input id="distQty" type="number" min="1" value="10" style="width:80px"><button id="distAdd">Adicionar doce atual</button><button id="distClear">Limpar lista</button><button id="distribute">Distribuir alternando</button></div><div id="distList"></div></details>
+    <details><summary>Resumo de produção e doces separados</summary><label>Separados da caixa <input id="extra" placeholder="Ex.: 2 doces em embalagem individual"></label><div id="summary"></div><button id="report">Baixar resumo</button></details>
+  </main>
+
+  <aside class="panel settings" id="settingsPanel">
+    <h2><span class="step">4</span> Ajustar doce</h2>
+    <div id="modelName"></div>
+    <p class="muted">Artes/carimbos ficam sobre o brigadeiro. Ejetor fica sem base e entra como o próprio doce.</p>
+    <div class="fields">
+      <div><label for="scale">Tamanho da arte</label><input id="scale" type="range" min="15" max="125" value="72"></div>
+      <div><label for="rotation">Rotação</label><input id="rotation" type="range" min="-180" max="180" value="0"></div>
+    </div>
+    <div class="actions"><button id="flip">Espelhar arte</button><button id="centerDecoration">Centralizar arte</button></div>
+    <div class="pair">
+      <div><label for="offsetX">Horizontal</label><input id="offsetX" type="range" min="-42" max="42" step="0.5" value="0"></div>
+      <div><label for="offsetY">Vertical</label><input id="offsetY" type="range" min="-42" max="42" step="0.5" value="0"></div>
+    </div>
+    <div class="paint-scroll"><canvas id="paint" width="400" height="400" tabindex="0" aria-label="Prévia do brigadeiro. Arraste a arte para mover."></canvas></div>
+    <p class="muted" id="paintHint">Escolha uma arte na biblioteca para colocar sobre o branquinho.</p>
+    <button id="replace" class="primary wide">Aplicar às posições selecionadas</button>
+    <details><summary>Gerenciar arte selecionada</summary><div class="actions"><button id="duplicateModel">Duplicar cadastro</button><button id="editUpload">Renomear / substituir</button><button id="deleteModel" class="danger">Excluir upload</button></div><p class="muted">O duplicar cria uma cópia do cadastro e alterna entre Arte e Ejetor para reaproveitar o mesmo personagem.</p></details>
+    <details><summary>Arquivos e biblioteca</summary><button id="download">Baixar projeto editável</button><label class="file">Abrir projeto<input id="open" type="file" accept=".json"></label><button id="libraryDownload">Baixar biblioteca</button><label class="file">Importar biblioteca<input id="libraryOpen" type="file" accept=".json"></label><p class="muted">Os uploads também são guardados localmente neste navegador. O projeto JSON continua levando sua biblioteca junto.</p></details>
+  </aside>
+</div>
+
+<dialog id="importDialog">
+  <div class="top"><h2>Enviar arte / carimbo / ejetor</h2><button id="closeImport">Fechar</button></div>
+  <div class="import-layout">
+    <div>
+      <label class="file">Escolher PNG, JPEG ou WebP<input id="upload" type="file" accept="image/png,image/jpeg,image/webp" multiple></label>
+      <p class="muted">Pode enviar uma ou várias imagens. O editor tenta retirar automaticamente o fundo ligado às bordas.</p>
+      <p class="muted" id="uploadCount">Nenhum arquivo selecionado.</p>
+      <canvas id="photo" width="600" height="450"></canvas>
+      <div class="actions"><button id="crop">Recortar seleção</button><button id="resetPhoto">Restaurar imagem</button><button id="prepare2d">Preparar em 2D</button></div>
+    </div>
+    <div>
+      <label for="newName">Nome da arte</label><input id="newName" placeholder="Ex.: Letra A jardim">
+      <label class="check"><input id="isEjetor" type="checkbox"> Este upload é Ejetor (sem base de doce)</label>
+      <label for="prepStyle">Preparação local</label><select id="prepStyle"><option value="none">Sem preparação extra</option><option value="soft">2D suave</option><option value="strong">2D forte / personagem</option></select>
+      <label for="prepColors">Número de cores</label><select id="prepColors"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option></select>
+      <label for="tags">Palavras de busca (opcional)</label><input id="tags" placeholder="jardim, rosa, letra A">
+      <button id="confirmImport" class="primary wide">Salvar na biblioteca</button>
+      <p class="muted">Se selecionar vários arquivos, todos serão salvos de uma vez usando o tipo escolhido.</p>
+      <p class="muted">Se marcar Ejetor, ele será usado sem a base redonda. Se não marcar, será uma arte sobre o branquinho.</p>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="editUploadDialog">
+  <div class="top"><h2>Editar upload</h2><button id="closeEditUpload">Fechar</button></div>
+  <label for="editName">Nome</label><input id="editName">
+  <label for="editTags">Palavras de busca</label><input id="editTags">
+  <label class="check"><input id="editIsEjetor" type="checkbox"> Este upload é Ejetor (sem base de doce)</label>
+  <label for="editFile">Substituir imagem (opcional)</label><input id="editFile" type="file" accept="image/png,image/jpeg,image/webp">
+  <p class="muted">Você pode manter como arte sobre o brigadeiro ou marcar como Ejetor.</p>
+  <p id="editError" role="alert"></p>
+  <button id="commitEditUpload" class="primary">Salvar alterações</button>
+</dialog>
+<script src="image-tools.js"></script><script src="presentation.js"></script><script src="editor.js"></script>
+</body></html>

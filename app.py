@@ -7,6 +7,7 @@ import io
 import pytz
 import base64
 from supabase import create_client, Client
+from docito_editor_component import mostrar_editor_docito
 
 # V8: preço do cento personalizável somente para Ninho Temático.
 # Dependências: streamlit, Pillow, pytz, supabase.
@@ -424,7 +425,7 @@ def gerar_imagem(cliente, data_entrega, itens, numero_orcamento,
     return buffer
 
 
-OPCOES_PAGINAS = ["✍️ Criar Novo Orçamento", "🔍 Buscar e Histórico"]
+OPCOES_PAGINAS = ["✍️ Criar Novo Orçamento", "🔍 Buscar e Histórico", "🍬 Projetos de Doces"]
 
 
 def hoje_brasil():
@@ -765,6 +766,12 @@ def tela_historico():
                     st.error(f"Não foi possível visualizar este orçamento: {e}")
 
 
+def tela_projetos():
+    st.subheader("🍬 Projetos de Doces Personalizados")
+    st.caption("Monte a caixa, guarde a biblioteca neste navegador e exporte a apresentação em PNG ou PDF.")
+    mostrar_editor_docito()
+
+
 def main():
     global supabase
     st.set_page_config(page_title="Docito Doceria - Orçamentos", page_icon="🍰")
@@ -786,8 +793,10 @@ def main():
     st.radio("Navegação", OPCOES_PAGINAS, key="pagina_ativa", horizontal=True, label_visibility="collapsed")
     if st.session_state.pagina_ativa == OPCOES_PAGINAS[0]:
         tela_criacao()
-    else:
+    elif st.session_state.pagina_ativa == OPCOES_PAGINAS[1]:
         tela_historico()
+    else:
+        tela_projetos()
 
 
 if __name__ == "__main__":
