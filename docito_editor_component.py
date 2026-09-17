@@ -3,7 +3,6 @@
 import base64
 import json
 import mimetypes
-from functools import lru_cache
 from pathlib import Path
 
 import streamlit.components.v1 as components
@@ -18,7 +17,6 @@ def _data_url(path):
     return f"data:{mime};base64,{encoded}"
 
 
-@lru_cache(maxsize=1)
 def _editor_html():
     page = (EDITOR_DIR / "index.html").read_text(encoding="utf-8")
     css = (EDITOR_DIR / "editor.css").read_text(encoding="utf-8")
