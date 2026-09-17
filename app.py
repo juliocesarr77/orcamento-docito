@@ -774,7 +774,13 @@ def tela_projetos():
 
 def main():
     global supabase
-    st.set_page_config(page_title="Docito Doceria - Orçamentos", page_icon="🍰")
+    # O iframe acompanha a largura da página. A coluna centralizada acionava
+    # o modo móvel do editor mesmo em monitores grandes.
+    pagina = st.session_state.get("pagina_ativa", OPCOES_PAGINAS[0])
+    st.set_page_config(
+        page_title="Docito Doceria - Orçamentos", page_icon="🍰",
+        layout="wide" if pagina == OPCOES_PAGINAS[2] else "centered",
+    )
     try:
         supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     except Exception as e:
