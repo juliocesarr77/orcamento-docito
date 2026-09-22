@@ -6,6 +6,7 @@ from uuid import uuid4
 import io
 import pytz
 import base64
+import qrcode
 from supabase import create_client, Client
 from docito_editor_component import mostrar_editor_docito
 
@@ -14,6 +15,10 @@ from docito_editor_component import mostrar_editor_docito
 # Mantenha logo.png e as fontes na mesma pasta deste arquivo.
 # Mantenha SUPABASE_URL e SUPABASE_KEY nos Secrets do Streamlit.
 BASE_DIR = Path(__file__).resolve().parent
+
+PIX_COPIA_E_COLA = "00020126360014BR.GOV.BCB.PIX0114+55379999651945204000053039865802BR5923Gerusa Antonia da Silva6009SAO PAULO62140510CTyV7CtNjZ63048AA1"
+PIX_FAVORECIDA = "Gerusa Antonia da Silva"
+PIX_CHAVE_EXIBICAO = "+55 37 99996-5194"
 
 
 def carregar_fonte(tamanho, negrito=False):
@@ -24,6 +29,19 @@ def carregar_fonte(tamanho, negrito=False):
         except OSError:
             pass
     return ImageFont.load_default()
+
+
+def gerar_qr_pix(tamanho=128):
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=8,
+        border=2,
+    )
+    qr.add_data(PIX_COPIA_E_COLA)
+    qr.make(fit=True)
+    imagem = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+    return imagem.resize((tamanho, tamanho), Image.Resampling.NEAREST)
 
 
 def formatar_real(valor):
@@ -167,12 +185,7 @@ def calcular_subtotal_item(item, quantidade_total_doces=None):
 
 def gerar_texto_item(item):
     quantidade = f"{item['qtd']}un" if item["tipo"] == "unitario" else formatar_peso(item["gramas"])
-    texto = f"{quantidade} - {item['produto']}"
-    if item_eh_ninho_tematico(item):
-        detalhes = str(item.get("detalhes", "")).strip()
-        if detalhes:
-            texto += f" | Detalhes: {detalhes}"
-    return texto
+    return f"{quantidade} - {item['produto']}"
 
 
 def calcular_total_embalagens_pedido(embalagem_pedido):
@@ -316,26 +329,39 @@ def gerar_imagem(cliente, data_entrega, itens, numero_orcamento,
         nome = gerar_texto_item(item)
         if desc_texto:
             nome += f" (-{desc_texto})"
-        detalhe = f"Original: {formatar_real(bruto)} | Desconto: -{formatar_real(desc)}" if desc > 0 else None
-        linhas.append([nome, formatar_real(total), marrom, False, detalhe])
+
+        detalhes = []
+        tema = str(item.get("detalhes", "")).strip()
+        if item_eh_ninho_tematico(item) and tema:
+            detalhes.append(f"Tema: {tema}")
+        if desc > 0:
+            detalhes.append(f"Original: {formatar_real(bruto)} | Desconto: -{formatar_real(desc)}")
+
+        linhas.append([nome, formatar_real(total), marrom, False, detalhes])
     if r["total_emb_pedido"] > 0:
-        linhas.append([f"Embalagem do pedido - {embalagem_pedido['descricao']}", formatar_real(r["total_emb_pedido"]), secao, True, None])
+        linhas.append([f"Embalagem do pedido - {embalagem_pedido['descricao']}", formatar_real(r["total_emb_pedido"]), secao, True, []])
     for emb in embalagens_especiais:
-        linhas.append([f"Embalagem especial - {emb['qtd']}x {emb['descricao']}", formatar_real(float(emb["qtd"]) * float(emb["valor_unit"])), secao, False, None])
+        linhas.append([f"Embalagem especial - {emb['qtd']}x {emb['descricao']}", formatar_real(float(emb["qtd"]) * float(emb["valor_unit"])), secao, False, []])
     for ad in adicionais:
-        linhas.append([f"Adicional - {ad['descricao']}", formatar_real(float(ad["valor"])), secao, False, None])
+        linhas.append([f"Adicional - {ad['descricao']}", formatar_real(float(ad["valor"])), secao, False, []])
     preparadas = []
-    for nome, valor, cor, negrito, detalhe in linhas:
+    for nome, valor, cor, negrito, detalhes in linhas:
         fonte = carregar_fonte(tamanho, negrito)
         partes = quebrar_texto_largura(medida, nome, fonte, 473)
         altura_linha = altura_linha_fonte(medida, fonte)
-        altura = max(espaco, len(partes) * altura_linha + (24 if detalhe else 0) + 8)
-        preparadas.append((partes, valor, cor, fonte, detalhe, altura_linha, altura))
+        fonte_detalhe = carregar_fonte(max(tamanho - 4, 11), False)
+        detalhe_partes = []
+        for detalhe in (detalhes or []):
+            detalhe_partes.extend(quebrar_texto_largura(medida, detalhe, fonte_detalhe, 455))
+        passo_detalhe = max(tamanho - 1, 15)
+        altura_detalhes = len(detalhe_partes) * passo_detalhe
+        altura = max(espaco, len(partes) * altura_linha + altura_detalhes + (8 if detalhe_partes else 4))
+        preparadas.append((partes, valor, cor, fonte, detalhe_partes, fonte_detalhe, altura_linha, altura))
     clientes = quebrar_texto_largura(medida, f"CLIENTE: {cliente.upper()}", carregar_fonte(18, True), 600)
     extra_cliente = max(0, len(clientes) - 1) * 28
     obs = quebrar_texto_largura(medida, observacao, carregar_fonte(14), 600) if observacao.strip() else []
     y_inicio = 280 + extra_cliente
-    y_fim = y_inicio + sum(it[6] for it in preparadas)
+    y_fim = y_inicio + sum(it[7] for it in preparadas)
     y_total = y_fim + 35 + (30 if r["total_doces"] > 0 else 0) + (35 if r["total_gramas"] > 0 else 5)
     for chave, incremento in (("total_emb_pedido", 30), ("total_emb_especiais", 25), ("total_adicionais", 25), ("desconto_itens", 35), ("desconto_geral", 35)):
         if r[chave] > 0:
@@ -343,7 +369,7 @@ def gerar_imagem(cliente, data_entrega, itens, numero_orcamento,
     if obs:
         y_total += 85 + len(obs) * 22
     y_total += 75
-    rodape = max(980, y_total + 205)
+    rodape = max(1030, y_total + 260)
     img = Image.new("RGB", (W, rodape + 190), "white")
     draw = ImageDraw.Draw(img)
 
@@ -369,12 +395,15 @@ def gerar_imagem(cliente, data_entrega, itens, numero_orcamento,
     texto(50, 220 + extra_cliente, f"ENTREGA: {data_entrega.strftime('%d/%m/%Y')}", 18, True, destaque)
     draw.line((50, 255 + extra_cliente, 650, 255 + extra_cliente), fill=fundo, width=3)
     y = y_inicio
-    for partes, valor, cor, fonte, detalhe, altura_linha, altura in preparadas:
+    for partes, valor, cor, fonte, detalhe_partes, fonte_detalhe, altura_linha, altura in preparadas:
         for i, parte in enumerate(partes):
             draw.text((50, y + i * altura_linha), parte, font=fonte, fill=cor)
         direita(y, valor, tamanho, False, cor)
-        if detalhe:
-            texto(65, y + len(partes) * altura_linha, detalhe, max(tamanho - 4, 11), False, cinza)
+        if detalhe_partes:
+            detalhe_y = y + len(partes) * altura_linha
+            passo_detalhe = max(tamanho - 1, 15)
+            for j, parte in enumerate(detalhe_partes):
+                draw.text((65, detalhe_y + j * passo_detalhe), parte, font=fonte_detalhe, fill=cinza)
         y += altura
     draw.line((50, y + 15, 650, y + 15), fill=fundo, width=3)
     y += 35
@@ -415,7 +444,17 @@ def gerar_imagem(cliente, data_entrega, itens, numero_orcamento,
     texto(50, y + 50, "FORMAS DE PAGAMENTO", 16, True)
     texto(50, y + 75, "Pix | Dinheiro | Cartão | Criptomoedas", 16)
     texto(50, y + 100, "Cartão em até 12x com acréscimo da maquininha.", 14)
-    texto(50, y + 125, "Data reservada mediante confirmação do pedido.", 14)
+    texto(50, y + 128, "Pagamento via Pix disponível no QR Code.", 13, False, cinza)
+    texto(50, y + 151, f"Favorecida: {PIX_FAVORECIDA}", 12, False, marrom)
+    texto(50, y + 171, f"Chave Pix: {PIX_CHAVE_EXIBICAO}", 12, False, marrom)
+    texto(50, y + 202, "Data reservada mediante confirmação do pedido.", 14)
+
+    try:
+        qr_pix = gerar_qr_pix(128)
+        img.paste(qr_pix, (510, y + 55))
+    except Exception:
+        pass
+
     agora = datetime.now(pytz.timezone("America/Sao_Paulo"))
     direita(rodape - 25, f"Gerado em: {agora.strftime('%d/%m/%Y %H:%M')} | Validade: 15 dias", 11, False, (160, 160, 160))
     draw.rectangle((0, rodape, W, img.height), fill=fundo)
@@ -543,8 +582,8 @@ def tela_criacao():
     if nome == "Ninho Temático":
         preco = st.number_input("Preço do cento — Ninho Temático (R$)", min_value=0.01, value=160.00, step=5.0, format="%.2f", key="preco_ninho_tematico")
         detalhes_ninho = st.text_input(
-            "Detalhes",
-            placeholder="Ex.: Bananas de Pijamas — ejetores",
+            "Tema",
+            placeholder="Ex.: Bananas de Pijamas — Foto",
             key="detalhes_ninho_tematico",
         )
         st.caption(f"Valor por unidade: {formatar_real(preco / 100)}. Calculado proporcionalmente à quantidade.")
@@ -659,9 +698,9 @@ def tela_criacao():
                 else:
                     st.caption("Este item antigo ainda usa a tabela progressiva. Ao alterar o preço acima, passa a usar preço proporcional.")
                 detalhes = st.text_input(
-                    "Detalhes deste Ninho Temático",
+                    "Tema",
                     value=str(item.get("detalhes", "")),
-                    placeholder="Ex.: Bananas de Pijamas — ejetores",
+                    placeholder="Ex.: Bananas de Pijamas — Foto",
                     key=f"detalhes_edit_{item_id}",
                 )
                 if detalhes.strip() != str(item.get("detalhes", "")).strip():
@@ -768,6 +807,9 @@ def tela_historico():
                 if not isinstance(item, dict):
                     continue
                 st.write("• " + gerar_texto_item(item))
+                tema = str(item.get("detalhes", "")).strip()
+                if item_eh_ninho_tematico(item) and tema:
+                    st.caption(f"Tema: {tema}")
                 if item_eh_ninho_tematico(item) and item.get("preco_manual", False):
                     st.caption(f"Preço personalizado: {formatar_real(float(item['preco_cento']))} o cento.")
             c1, c2 = st.columns(2)
