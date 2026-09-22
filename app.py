@@ -167,7 +167,12 @@ def calcular_subtotal_item(item, quantidade_total_doces=None):
 
 def gerar_texto_item(item):
     quantidade = f"{item['qtd']}un" if item["tipo"] == "unitario" else formatar_peso(item["gramas"])
-    return f"{quantidade} - {item['produto']}"
+    texto = f"{quantidade} - {item['produto']}"
+    if item_eh_ninho_tematico(item):
+        detalhes = str(item.get("detalhes", "")).strip()
+        if detalhes:
+            texto += f" | Detalhes: {detalhes}"
+    return texto
 
 
 def calcular_total_embalagens_pedido(embalagem_pedido):
@@ -534,8 +539,14 @@ def tela_criacao():
     nome = st.selectbox("Produto", list(CATALOGO))
     produto = CATALOGO[nome]
     preco = produto.get("preco_cento")
+    detalhes_ninho = ""
     if nome == "Ninho Temático":
         preco = st.number_input("Preço do cento — Ninho Temático (R$)", min_value=0.01, value=160.00, step=5.0, format="%.2f", key="preco_ninho_tematico")
+        detalhes_ninho = st.text_input(
+            "Detalhes",
+            placeholder="Ex.: Bananas de Pijamas — ejetores",
+            key="detalhes_ninho_tematico",
+        )
         st.caption(f"Valor por unidade: {formatar_real(preco / 100)}. Calculado proporcionalmente à quantidade.")
     if produto["tipo"] == "unitario":
         c1, c2, c3 = st.columns([2, 1, 2])
@@ -548,6 +559,7 @@ def tela_criacao():
                 "preco_cento": float(preco), "preco_unitario": produto.get("preco_unitario"),
                 "conta_como_doce": produto.get("conta_como_doce", True),
                 "preco_manual": nome == "Ninho Temático", "desconto": desc.strip(),
+                "detalhes": detalhes_ninho.strip() if nome == "Ninho Temático" else "",
             })
             invalidar_imagem()
             st.rerun()
@@ -646,6 +658,15 @@ def tela_criacao():
                     st.caption(f"Preço personalizado: {formatar_real(float(item['preco_cento']))} o cento.")
                 else:
                     st.caption("Este item antigo ainda usa a tabela progressiva. Ao alterar o preço acima, passa a usar preço proporcional.")
+                detalhes = st.text_input(
+                    "Detalhes deste Ninho Temático",
+                    value=str(item.get("detalhes", "")),
+                    placeholder="Ex.: Bananas de Pijamas — ejetores",
+                    key=f"detalhes_edit_{item_id}",
+                )
+                if detalhes.strip() != str(item.get("detalhes", "")).strip():
+                    item["detalhes"] = detalhes.strip()
+                    alterou = True
         else:
             c1, unidade_col, c2, c3, c4 = st.columns([2.4, 1, 1.2, 1.4, 0.5])
             c1.write(f"**{item['produto']}**  \n{formatar_peso(item['gramas'])} | {formatar_real(bruto)} → **{formatar_real(final)}**")
