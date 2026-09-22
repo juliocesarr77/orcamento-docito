@@ -2,3 +2,4 @@ streamlit
 Pillow
 pytz
 supabase
+qrcode
