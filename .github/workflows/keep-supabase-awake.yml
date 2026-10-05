@@ -3,6 +3,7 @@ name: Docito - Verificar Supabase
 # Em Settings > Secrets and variables > Actions, cadastre
 # SUPABASE_PUBLISHABLE_KEY com a chave sb_publishable_... deste projeto.
 # Uma chave anon legada em SUPABASE_ANON_KEY também é aceita.
+# Execute supabase/docito_keep_alive.sql uma vez no SQL Editor deste projeto.
 # Não use sb_secret_... nem service_role.
 # O agendamento depende do GitHub Actions estar habilitado e pode ser
 # desativado após 60 dias sem atividade neste repositório público.
@@ -17,6 +18,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/keep-supabase-awake.yml'
+      - 'supabase/docito_keep_alive.sql'
 
 permissions: {}
 
@@ -31,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Consultar uma linha sem modificar orçamentos
+      - name: Consultar disponibilidade do banco
         env:
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
         shell: bash
@@ -46,7 +48,7 @@ jobs:
           from urllib.request import HTTPRedirectHandler, Request, build_opener
 
           project_ref = "hmboxwsxuvjzloksibvd"
-          endpoint = f"https://{project_ref}.supabase.co/rest/v1/orcamentos?select=id&limit=1"
+          endpoint = f"https://{project_ref}.supabase.co/rest/v1/rpc/docito_keep_alive"
           key = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "").strip()
 
           def fail(message):
@@ -84,25 +86,39 @@ jobs:
                   with opener.open(request, timeout=20) as response:
                       if response.status != 200:
                           fail("O banco não confirmou a consulta com HTTP 200.")
-                      body = response.read(4097)
-                  if len(body) > 4096:
-                      fail("Resposta maior que o esperado para a consulta de uma linha.")
+                      body = response.read(513)
+                  if len(body) > 512:
+                      fail("Resposta maior que o esperado para a verificação do banco.")
                   try:
-                      rows = json.loads(body)
+                      server_time = json.loads(body)
+                      if not isinstance(server_time, str):
+                          raise ValueError
+                      server_datetime = datetime.fromisoformat(server_time.replace("Z", "+00:00"))
+                      if server_datetime.tzinfo is None:
+                          raise ValueError
                   except (ValueError, UnicodeError):
-                      fail("O Supabase não devolveu uma resposta JSON válida.")
-                  if not isinstance(rows, list) or len(rows) > 1 or any(
-                      not isinstance(row, dict) or set(row) != {"id"} for row in rows
-                  ):
-                      fail("Resposta incompatível com a consulta da tabela orcamentos.")
+                      fail("A função docito_keep_alive não devolveu uma data e hora válida.")
+                  if abs((datetime.now(timezone.utc) - server_datetime).total_seconds()) > 300:
+                      fail("A função retornou uma data e hora desatualizada; confira a configuração.")
                   break
               except HTTPError as error:
                   status = error.code
-                  error.close()
+                  try:
+                      error_payload = json.loads(error.read(4096))
+                      if not isinstance(error_payload, dict):
+                          error_payload = {}
+                  except (ValueError, UnicodeError, OSError):
+                      error_payload = {}
+                  finally:
+                      error.close()
                   if status in (401, 403):
-                      fail(f"HTTP {status}: confira a chave pública e a permissão de leitura da tabela; não desative RLS.")
+                      if error_payload.get("code") == "42501":
+                          fail("A chave foi reconhecida, mas falta permissão para executar docito_keep_alive. Execute supabase/docito_keep_alive.sql no SQL Editor.")
+                      if "invalid api key" in str(error_payload.get("message", "")).lower():
+                          fail("A chave cadastrada é inválida ou pertence a outro projeto. Confira SUPABASE_PUBLISHABLE_KEY.")
+                      fail(f"HTTP {status}: confira a chave pública e a permissão da função docito_keep_alive.")
                   if status == 404:
-                      fail("HTTP 404: confira no Supabase se o projeto está ativo e a tabela orcamentos existe.")
+                      fail("Execute supabase/docito_keep_alive.sql no SQL Editor e confira se o projeto Supabase está ativo.")
                   if status != 429 and status < 500:
                       fail(f"Consulta recusada (HTTP {status}).")
                   if attempt == 3:
@@ -120,5 +136,5 @@ jobs:
           summary = os.environ.get("GITHUB_STEP_SUMMARY")
           if summary:
               with open(summary, "a", encoding="utf-8") as output:
-                  output.write(f"### Supabase Docito disponível\n\nConsulta GET à tabela `orcamentos` confirmada em {checked_at}.\n")
+                  output.write(f"### Supabase Docito disponível\n\nConsulta GET à função `docito_keep_alive` confirmada em {checked_at}.\n")
           PY
