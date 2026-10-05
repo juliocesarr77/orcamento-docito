@@ -1,0 +1,124 @@
+name: Docito - Verificar Supabase
+
+# Em Settings > Secrets and variables > Actions, cadastre
+# SUPABASE_PUBLISHABLE_KEY com a chave sb_publishable_... deste projeto.
+# Uma chave anon legada em SUPABASE_ANON_KEY também é aceita.
+# Não use sb_secret_... nem service_role.
+# O agendamento depende do GitHub Actions estar habilitado e pode ser
+# desativado após 60 dias sem atividade neste repositório público.
+# Consultas periódicas não garantem ausência de pausa no Supabase Free.
+
+on:
+  schedule:
+    # 08:17 e 20:17 no horário de Brasília (11:17 e 23:17 UTC).
+    - cron: '17 11,23 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/keep-supabase-awake.yml'
+
+permissions: {}
+
+concurrency:
+  group: docito-supabase-availability
+  cancel-in-progress: false
+
+jobs:
+  verificar-banco:
+    # Uma cópia/fork não deve consultar o projeto original da Docito.
+    if: github.repository == 'juliocesarr77/orcamento-docito'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Consultar uma linha sem modificar orçamentos
+        env:
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import time
+          from datetime import datetime, timezone
+          from urllib.error import HTTPError, URLError
+          from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+          project_ref = "hmboxwsxuvjzloksibvd"
+          endpoint = f"https://{project_ref}.supabase.co/rest/v1/orcamentos?select=id&limit=1"
+          key = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "").strip()
+
+          def fail(message):
+              raise SystemExit(f"::error::{message}")
+
+          if not key:
+              fail("Cadastre SUPABASE_PUBLISHABLE_KEY em Settings > Secrets and variables > Actions.")
+          if any(char.isspace() for char in key):
+              fail("A chave cadastrada contém espaços ou quebras de linha.")
+
+          headers = {"apikey": key, "Accept": "application/json", "User-Agent": "Docito-Supabase-Check/1.0"}
+          if not key.startswith("sb_publishable_"):
+              try:
+                  parts = key.split(".")
+                  if len(parts) != 3:
+                      raise ValueError
+                  payload = parts[1]
+                  claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+                  if not isinstance(claims, dict):
+                      raise ValueError
+              except (ValueError, UnicodeError):
+                  fail("Use uma chave sb_publishable_... ou anon legada; não use secret/service_role.")
+              if claims.get("role") != "anon" or claims.get("ref") != project_ref:
+                  fail("A chave deve ser anon do projeto orcamentos-docito; não use service_role.")
+              headers["Authorization"] = f"Bearer {key}"
+
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, response_headers, newurl):
+                  return None
+
+          opener = build_opener(NoRedirect())
+          request = Request(endpoint, headers=headers, method="GET")
+          for attempt in range(1, 4):
+              try:
+                  with opener.open(request, timeout=20) as response:
+                      if response.status != 200:
+                          fail("O banco não confirmou a consulta com HTTP 200.")
+                      body = response.read(4097)
+                  if len(body) > 4096:
+                      fail("Resposta maior que o esperado para a consulta de uma linha.")
+                  try:
+                      rows = json.loads(body)
+                  except (ValueError, UnicodeError):
+                      fail("O Supabase não devolveu uma resposta JSON válida.")
+                  if not isinstance(rows, list) or len(rows) > 1 or any(
+                      not isinstance(row, dict) or set(row) != {"id"} for row in rows
+                  ):
+                      fail("Resposta incompatível com a consulta da tabela orcamentos.")
+                  break
+              except HTTPError as error:
+                  status = error.code
+                  error.close()
+                  if status in (401, 403):
+                      fail(f"HTTP {status}: confira a chave pública e a permissão de leitura da tabela; não desative RLS.")
+                  if status == 404:
+                      fail("HTTP 404: confira no Supabase se o projeto está ativo e a tabela orcamentos existe.")
+                  if status != 429 and status < 500:
+                      fail(f"Consulta recusada (HTTP {status}).")
+                  if attempt == 3:
+                      fail(f"Supabase indisponível após três tentativas (HTTP {status}).")
+                  print(f"Falha temporária (HTTP {status}); tentando novamente.")
+              except (URLError, TimeoutError, OSError):
+                  if attempt == 3:
+                      fail("Não foi possível consultar o Supabase após três tentativas.")
+                  print("Falha temporária de conexão; tentando novamente.")
+              time.sleep(5 * attempt)
+
+          checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+          print(f"Consulta ao banco concluída (HTTP 200) em {checked_at}.")
+          # Não imprima a chave, o corpo da resposta ou identificadores de clientes.
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as output:
+                  output.write(f"### Supabase Docito disponível\n\nConsulta GET à tabela `orcamentos` confirmada em {checked_at}.\n")
+          PY
