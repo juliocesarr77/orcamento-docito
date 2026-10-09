@@ -1,0 +1,30 @@
+name: Editor project files
+
+on:
+  push:
+    paths:
+      - 'editor/**'
+      - 'docito_editor_component.py'
+      - 'tests/**'
+      - '.github/workflows/editor-project-tests.yml'
+  pull_request:
+    paths:
+      - 'editor/**'
+      - 'docito_editor_component.py'
+      - 'tests/**'
+      - '.github/workflows/editor-project-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test tests/project-files.test.cjs
+      - run: node --check editor/editor.js && node --check editor/project-files.js
+      - run: python3 -m py_compile docito_editor_component.py

@@ -97,7 +97,7 @@
     <p class="muted" id="paintHint">Escolha uma arte na biblioteca para colocar sobre o branquinho.</p>
     <button id="replace" class="primary wide">Aplicar às posições selecionadas</button>
     <details><summary>Gerenciar arte selecionada</summary><div class="actions"><button id="duplicateModel">Duplicar cadastro</button><button id="editUpload">Renomear / substituir</button><button id="deleteModel" class="danger">Excluir upload</button></div><p class="muted">O duplicar cria uma cópia do cadastro e alterna entre Arte e Ejetor para reaproveitar o mesmo personagem.</p></details>
-    <details><summary>Arquivos e biblioteca</summary><button id="download">Baixar projeto editável</button><label class="file">Abrir projeto<input id="open" type="file" accept=".json"></label><button id="libraryDownload">Baixar biblioteca</button><label class="file">Importar biblioteca<input id="libraryOpen" type="file" accept=".json"></label><p class="muted">Os uploads também são guardados localmente neste navegador. O projeto JSON continua levando sua biblioteca junto.</p></details>
+    <details><summary>Arquivos e biblioteca</summary><button id="download">Baixar projeto editável</button><label class="file">Abrir projeto<input id="open" type="file" accept=".json,application/json"></label><button id="libraryDownload">Baixar biblioteca</button><label class="file">Importar biblioteca<input id="libraryOpen" type="file" accept=".json,application/json"></label><p class="muted">Os uploads também são guardados localmente neste navegador. O projeto JSON continua levando sua biblioteca junto. Você pode abrir projetos antigos e arquivos de até 250 MB.</p></details>
   </aside>
 </div>
 
@@ -134,5 +134,12 @@
   <p id="editError" role="alert"></p>
   <button id="commitEditUpload" class="primary">Salvar alterações</button>
 </dialog>
-<script src="image-tools.js"></script><script src="presentation.js"></script><script src="editor.js"></script>
+<dialog id="openProjectDialog" aria-labelledby="openProjectTitle">
+  <form method="dialog">
+    <h2 id="openProjectTitle">Abrir o projeto salvo?</h2>
+    <p>A montagem atual será substituída. Você poderá recuperá-la com Desfazer.</p>
+    <div class="actions"><button value="cancel" autofocus>Manter montagem atual</button><button value="open" class="primary">Abrir projeto</button></div>
+  </form>
+</dialog>
+<script src="image-tools.js"></script><script src="presentation.js"></script><script src="project-files.js"></script><script src="editor.js"></script>
 </body></html>

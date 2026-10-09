@@ -22,6 +22,7 @@ def _editor_html():
     css = (EDITOR_DIR / "editor.css").read_text(encoding="utf-8")
     image_tools = (EDITOR_DIR / "image-tools.js").read_text(encoding="utf-8")
     presentation = (EDITOR_DIR / "presentation.js").read_text(encoding="utf-8")
+    project_files = (EDITOR_DIR / "project-files.js").read_text(encoding="utf-8")
     editor = (EDITOR_DIR / "editor.js").read_text(encoding="utf-8")
     assets = {
         "logo-docito.png": _data_url(EDITOR_DIR / "logo-docito.png"),
@@ -33,11 +34,11 @@ def _editor_html():
     page = page.replace('<link rel="stylesheet" href="editor.css">', f"<style>{css}</style>")
     page = page.replace('src="logo-docito.png"', f'src="{assets["logo-docito.png"]}"')
     page = page.replace(
-        '<script src="image-tools.js"></script><script src="presentation.js"></script><script src="editor.js"></script>',
+        '<script src="image-tools.js"></script><script src="presentation.js"></script><script src="project-files.js"></script><script src="editor.js"></script>',
         "<script>"
         f"window.DOCITO_ASSETS={json.dumps(assets, ensure_ascii=False)};"
         "window.DOCITO_EMBED_CONFIG={cloud:false,sample:null,logo:window.DOCITO_ASSETS['logo-docito.png']};"
-        f"{image_tools}\n{presentation}\n{editor}"
+        f"{image_tools}\n{presentation}\n{project_files}\n{editor}"
         "</script>",
     )
     return page
