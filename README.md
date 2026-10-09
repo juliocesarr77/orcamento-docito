@@ -25,7 +25,7 @@ A migração em `supabase/migrations/20261009153118_private_access_and_catalogue
 
 ## Instalação e verificação
 
-Use Python 3.12. `requirements.in` declara as dependências diretas; `requirements.txt` fixa também as versões transitivas utilizadas no deploy. A biblioteca Authlib está incluída para o login Google.
+Use Python 3.12 ou 3.13 (a hospedagem usa 3.13). `requirements.in` declara as dependências diretas e as restrições de compatibilidade; `requirements.txt` fixa também as versões transitivas utilizadas no deploy. A biblioteca Authlib está incluída para o login Google. `multidict` usa a versão 7.0.0 compatível com os dois ambientes; `pyarrow` usa 24.0.0, pois o Community Cloud bloqueia 25.0.1 por falha de segmentação.
 
 ```sh
 python -m pip install -r requirements.txt

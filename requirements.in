@@ -4,3 +4,7 @@ Pillow==12.3.0
 pytz==2026.5
 supabase==2.32.0
 qrcode==8.2
+# Compatibilidade com Python 3.13 no Community Cloud.
+multidict==7.0.0
+# Community Cloud bloqueia pyarrow 25.0.1 por uma falha de segmentação.
+pyarrow==24.0.0
