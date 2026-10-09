@@ -1,0 +1,6 @@
+streamlit[auth]==1.65.0
+Authlib==1.8.0
+Pillow==12.3.0
+pytz==2026.5
+supabase==2.32.0
+qrcode==8.2

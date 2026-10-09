@@ -1,0 +1,12 @@
+[server]
+enableCORS = true
+enableXsrfProtection = true
+enableStaticServing = false
+trustedUserHeaders = {}
+
+[client]
+showErrorDetails = "none"
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false

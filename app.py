@@ -3,18 +3,25 @@ from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
+from copy import deepcopy
 import io
+import html
+import re
+import math
 import pytz
 import base64
 import qrcode
-from supabase import create_client, Client
+from supabase import create_client
 from docito_editor_component import mostrar_editor_docito
+from docito_auth import mostrar_login, exigir_acesso, sair
+from docito_catalog import CATALOGO_PADRAO, REGRAS_PADRAO, montar_catalogo
+from docito_settings import carregar_configuracao, mostrar_configuracoes
 
-# V8: preço do cento personalizável somente para Ninho Temático.
-# Dependências: streamlit, Pillow, pytz, supabase.
 # Mantenha logo.png e as fontes na mesma pasta deste arquivo.
-# Mantenha SUPABASE_URL e SUPABASE_KEY nos Secrets do Streamlit.
+# Credenciais ficam somente nos Secrets do Streamlit (veja README.md).
 BASE_DIR = Path(__file__).resolve().parent
+CATALOGO = deepcopy(CATALOGO_PADRAO)
+REGRAS_PRECO_DOCES = deepcopy(REGRAS_PADRAO)
 
 PIX_COPIA_E_COLA = "00020126360014BR.GOV.BCB.PIX0114+55379999651945204000053039865802BR5923Gerusa Antonia da Silva6009SAO PAULO62140510CTyV7CtNjZ63048AA1"
 PIX_FAVORECIDA = "Gerusa Antonia da Silva"
@@ -96,53 +103,23 @@ def calcular_desconto(valor_base, desconto_str):
         return 0.0, ""
 
 
-CATALOGO = {
-    "Brigadeiro de Chocolate": {"tipo": "unitario", "preco_cento": 125.00},
-    "Brigadeiro de Ninho": {"tipo": "unitario", "preco_cento": 125.00},
-    "Beijinho": {"tipo": "unitario", "preco_cento": 130.00},
-    "Meio a Meio": {"tipo": "unitario", "preco_cento": 130.00},
-    "Bicho de Pé": {"tipo": "unitario", "preco_cento": 125.00},
-    "Moranguinho": {"tipo": "unitario", "preco_cento": 125.00},
-    "Cajuzinho": {"tipo": "unitario", "preco_cento": 130.00},
-    "Ninho com Nutella": {"tipo": "unitario", "preco_cento": 150.00},
-    "Churros": {"tipo": "unitario", "preco_cento": 150.00},
-    "Ferrero Rocher": {"tipo": "unitario", "preco_cento": 150.00},
-    "Maracujá": {"tipo": "unitario", "preco_cento": 150.00},
-    "Limão": {"tipo": "unitario", "preco_cento": 150.00},
-    "Maçãzinha": {"tipo": "unitario", "preco_cento": 150.00},
-    "Olho de Sogra": {"tipo": "unitario", "preco_cento": 150.00},
-    "Oreo": {"tipo": "unitario", "preco_cento": 150.00},
-    "Ninho Temático": {"tipo": "unitario", "preco_cento": 160.00},
-    "Aplique": {"tipo": "unitario", "preco_cento": 150.00, "preco_unitario": 1.50, "conta_como_doce": False},
-    "Brigadeiro de Chocolate em massa": {"tipo": "kg", "preco_kg": 84.90},
-    "Brigadeiro de Chocolate Branco": {"tipo": "unitario", "preco_cento": 150.00},
-    "Brigadeiro de Ninho com Rosetas Coloridas e Apliques de Pasta Americana": {
-        "tipo": "unitario", "preco_cento": 160.00,
-    },
-}
 
-REGRAS_PRECO_DOCES = {
-    125.00: {"unitario_ate_25": 1.50, 40: 58.90, 50: 68.90, 75: 98.90, 90: 116.90, 100: 125.00},
-    130.00: {"unitario_ate_25": 1.50, 40: 59.90, 50: 71.90, 75: 104.90, 90: 123.90, 100: 130.00},
-    150.00: {"unitario_ate_25": 2.00, 40: 77.90, 50: 82.90, 75: 117.90, 90: 140.90, 100: 150.00},
-    160.00: {"unitario_ate_25": 2.00, 40: 78.90, 50: 85.00, 75: 124.90, 90: 148.90, 100: 160.00},
-}
 
 
 def interpolar(valor_inicial, valor_final, posicao):
     return valor_inicial + (valor_final - valor_inicial) * posicao
 
 
-def calcular_valor_unitario_doces(preco_cento, quantidade_total_doces):
+def calcular_valor_unitario_doces(preco_cento, quantidade_total_doces, regras=None):
     preco_cento = round(float(preco_cento), 2)
     qtd = max(int(quantidade_total_doces), 1)
-    regra = REGRAS_PRECO_DOCES.get(preco_cento)
+    regra = (REGRAS_PRECO_DOCES if regras is None else regras).get(preco_cento)
     if regra is None or qtd >= 100:
         return preco_cento / 100
     if qtd <= 25:
         return float(regra["unitario_ate_25"])
     pontos = [(25, float(regra["unitario_ate_25"]))]
-    pontos.extend((n, float(regra[n]) / n) for n in (40, 50, 75, 90, 100))
+    pontos.extend((n, float(regra.get(n, regra.get(str(n)))) / n) for n in (40, 50, 75, 90, 100))
     for (inicio, valor_inicio), (fim, valor_fim) in zip(pontos, pontos[1:]):
         if qtd <= fim:
             return interpolar(valor_inicio, valor_fim, (qtd - inicio) / (fim - inicio))
@@ -155,11 +132,11 @@ def calcular_preco_doces(preco_cento, qtd):
 
 
 def item_eh_aplique(item):
-    return item.get("conta_como_doce") is False or str(item.get("produto", "")).strip().casefold() == "aplique"
+    return item.get("conta_como_doce") is False or ("conta_como_doce" not in item and str(item.get("produto", "")).strip().casefold() == "aplique")
 
 
 def item_eh_ninho_tematico(item):
-    return str(item.get("produto", "")).strip().casefold() == "ninho temático"
+    return item.get("tematico", str(item.get("produto", "")).strip().casefold() == "ninho temático") is True
 
 
 def calcular_total_doces_pedido(itens):
@@ -169,13 +146,16 @@ def calcular_total_doces_pedido(itens):
 def calcular_subtotal_item(item, quantidade_total_doces=None):
     if item["tipo"] == "unitario":
         qtd = int(item["qtd"])
-        if item_eh_aplique(item):
-            bruto = float(item.get("preco_unitario") or 1.50) * qtd
+        if item.get("cobranca") == "Unidade" or item_eh_aplique(item):
+            bruto = float(item.get("preco_unitario") or float(item["preco_cento"]) / 100) * qtd
         elif item_eh_ninho_tematico(item) and item.get("preco_manual", False):
             bruto = float(item["preco_cento"]) / 100 * qtd
         else:
             total_doces = max(int(quantidade_total_doces or qtd), 1)
-            bruto = calcular_valor_unitario_doces(item["preco_cento"], total_doces) * qtd
+            # Itens novos guardam sua faixa. Itens antigos usam a tabela original.
+            preco_cento = round(float(item["preco_cento"]), 2)
+            regra = item.get("regra_preco", REGRAS_PADRAO.get(preco_cento))
+            bruto = calcular_valor_unitario_doces(preco_cento, total_doces, {preco_cento: regra} if regra else {}) * qtd
         bruto = round(bruto, 2)
     else:
         bruto = float(item["preco_kg"]) / 1000 * int(item["gramas"])
@@ -255,12 +235,16 @@ def preparar_registro_supabase(novo_registro):
     registro["data_entrega"] = str(registro["data_entrega"])
     if not registro["cliente"]:
         raise ValueError("O nome da cliente não pode ficar vazio.")
+    if len(registro["cliente"]) > 200:
+        raise ValueError("O nome da cliente deve ter até 200 caracteres.")
     for campo in ("itens", "embalagens_especiais", "adicionais"):
         registro[campo] = list(registro.get(campo) or [])
     registro["embalagem_pedido"] = dict(registro.get("embalagem_pedido") or {"descricao": "", "valor": 0.0})
     for campo in ("observacao", "desconto_geral"):
         registro[campo] = str(registro.get(campo) or "")
     registro["total"] = round(float(registro.get("total", 0)), 2)
+    if not math.isfinite(registro["total"]) or registro["total"] < 0:
+        raise ValueError("Total inválido.")
     registro["dados"] = {campo: registro[campo] for campo in (
         "itens", "embalagem_pedido", "embalagens_especiais", "adicionais",
         "observacao", "desconto_geral", "total",
@@ -269,31 +253,35 @@ def preparar_registro_supabase(novo_registro):
 
 
 def carregar_historico_supabase():
+    exigir_acesso()
     try:
         resposta = supabase.table("orcamentos").select("*").order("numero", desc=True).execute()
         return [normalizar_orcamento(it) for it in (resposta.data or [])]
-    except Exception as e:
-        st.error(f"Erro ao buscar dados do Supabase: {e}")
+    except Exception:
+        st.error("Não foi possível carregar o histórico. Tente novamente.")
         return []
 
 
 def obter_proximo_numero():
-    resposta = supabase.table("orcamentos").select("numero").order("numero", desc=True).limit(1).execute()
-    return max(234, int(resposta.data[0]["numero"]) + 1) if resposta.data else 234
+    exigir_acesso()
+    resposta = supabase.rpc("docito_proximo_numero").execute()
+    return int(resposta.data)
 
 
 def salvar_orcamento_supabase(novo_registro):
+    exigir_acesso()
     try:
         resposta = supabase.table("orcamentos").insert(preparar_registro_supabase(novo_registro)).execute()
         if not resposta.data:
             raise RuntimeError("O Supabase não confirmou a inclusão.")
         return resposta.data[0]
-    except Exception as e:
-        st.error(f"Erro ao salvar: {e}")
+    except Exception:
+        st.error("Não foi possível salvar o orçamento. Tente novamente.")
         return None
 
 
 def atualizar_orcamento_supabase(orcamento_id, registro_atualizado):
+    exigir_acesso()
     try:
         if not orcamento_id:
             raise ValueError("Identificador do orçamento não encontrado.")
@@ -303,8 +291,8 @@ def atualizar_orcamento_supabase(orcamento_id, registro_atualizado):
         if not resposta.data:
             raise RuntimeError("O Supabase não confirmou a atualização.")
         return resposta.data[0]
-    except Exception as e:
-        st.error(f"Erro ao atualizar: {e}")
+    except Exception:
+        st.error("Não foi possível atualizar o orçamento. Tente novamente.")
         return None
 
 
@@ -495,11 +483,13 @@ def limpar_widgets_itens():
 
 
 def limpar_orcamento():
+    exigir_acesso()
     limpar_widgets_itens()
     st.session_state.update(estado_inicial())
 
 
 def carregar_orcamento_para_edicao(orcamento):
+    exigir_acesso()
     limpar_widgets_itens()
     o = normalizar_orcamento(orcamento)
     try:
@@ -522,10 +512,12 @@ def carregar_orcamento_para_edicao(orcamento):
 
 
 def invalidar_imagem():
+    exigir_acesso()
     st.session_state.ultimo_resultado = None
 
 
 def aplicar_preco_ninho(indice, chave):
+    exigir_acesso()
     item = st.session_state.carrinho[indice]
     if item_eh_ninho_tematico(item):
         item["preco_cento"] = float(st.session_state[chave])
@@ -534,23 +526,31 @@ def aplicar_preco_ninho(indice, chave):
 
 
 def sincronizar_peso(indice, item_id):
+    exigir_acesso()
     gramas = int(st.session_state.carrinho[indice]["gramas"])
     st.session_state[f"peso_edit_kg_{item_id}"] = gramas / 1000
     st.session_state[f"peso_edit_g_{item_id}"] = gramas
 
 
 def mostrar_resultado(resultado, chave):
-    st.image(resultado["imagem"])
-    c1, c2 = st.columns(2)
-    c1.download_button(
-        "📥 Baixar Orçamento", data=resultado["imagem"],
-        file_name=f"Docito_N{resultado['numero']:03d}_{resultado['cliente']}.png",
-        mime="image/png", key=f"download_{chave}",
-    )
-    with c2:
-        codificado = base64.b64encode(resultado["imagem"]).decode()
-        st.components.v1.html(f"""
-        <button onclick="copyImage()" style="width:100%;background:#d86a2b;color:white;border:0;padding:10px;border-radius:8px;cursor:pointer;font-weight:600;">📋 Copiar imagem</button>
+    exigir_acesso()
+    # Evita URLs públicas de /media para imagens com dados de clientes.
+    codificado = base64.b64encode(resultado["imagem"]).decode("ascii")
+    cliente_arquivo = re.sub(r"[^\w.-]+", "_", str(resultado["cliente"]))[:100]
+    arquivo = html.escape(f"Docito_N{int(resultado['numero']):03d}_{cliente_arquivo}.png", quote=True)
+    altura = Image.open(io.BytesIO(resultado["imagem"])).height
+    st.components.v1.html(f"""
+        <style>
+        body {{margin:0;font-family:system-ui,sans-serif}}
+        img {{display:block;max-width:100%;height:auto;margin:auto}}
+        .actions {{display:flex;gap:12px;margin-top:12px}}
+        a,button {{flex:1;background:#d86a2b;color:white;border:0;padding:12px;border-radius:8px;cursor:pointer;font:600 14px system-ui;text-decoration:none;text-align:center}}
+        </style>
+        <img src="data:image/png;base64,{codificado}" alt="Orçamento Docito">
+        <div class="actions">
+        <a href="data:image/png;base64,{codificado}" download="{arquivo}">📥 Baixar orçamento</a>
+        <button onclick="copyImage()">📋 Copiar imagem</button>
+        </div>
         <script>
         async function copyImage() {{
             try {{
@@ -563,7 +563,7 @@ def mostrar_resultado(resultado, chave):
             }}
         }}
         </script>
-        """, height=55)
+        """, height=min(altura + 90, 1500), scrolling=True)
 
 
 def tela_criacao():
@@ -571,7 +571,7 @@ def tela_criacao():
         st.info(f"✏️ Editando o orçamento Nº {int(st.session_state.editando_numero):03d}. O número será mantido.")
         st.button("Cancelar edição e criar novo orçamento", on_click=limpar_orcamento)
     c1, c2 = st.columns(2)
-    cliente = c1.text_input("Nome da Cliente", key="cliente_input", on_change=invalidar_imagem)
+    cliente = c1.text_input("Nome da Cliente", key="cliente_input", max_chars=200, on_change=invalidar_imagem)
     entrega = c2.date_input("Data da Entrega", key="data_entrega_input", on_change=invalidar_imagem)
     st.divider()
     st.subheader("Adicionar produtos")
@@ -579,8 +579,8 @@ def tela_criacao():
     produto = CATALOGO[nome]
     preco = produto.get("preco_cento")
     detalhes_ninho = ""
-    if nome == "Ninho Temático":
-        preco = st.number_input("Preço do cento — Ninho Temático (R$)", min_value=0.01, value=160.00, step=5.0, format="%.2f", key="preco_ninho_tematico")
+    if produto.get("tematico", nome == "Ninho Temático"):
+        preco = st.number_input(f"Preço do cento — {nome} (R$)", min_value=0.01, max_value=99999.99, value=float(preco), step=5.0, format="%.2f", key=f"preco_tema_{nome}_{st.session_state['_catalogo_revisao']}")
         detalhes_ninho = st.text_input(
             "Tema",
             placeholder="Ex.: Bananas de Pijamas — Foto",
@@ -597,8 +597,11 @@ def tela_criacao():
                 "id": uuid4().hex, "produto": nome, "tipo": "unitario", "qtd": int(qtd),
                 "preco_cento": float(preco), "preco_unitario": produto.get("preco_unitario"),
                 "conta_como_doce": produto.get("conta_como_doce", True),
-                "preco_manual": nome == "Ninho Temático", "desconto": desc.strip(),
-                "detalhes": detalhes_ninho.strip() if nome == "Ninho Temático" else "",
+                "cobranca": produto.get("cobranca", "Cento"),
+                "tematico": produto.get("tematico", nome == "Ninho Temático"),
+                "regra_preco": deepcopy(REGRAS_PRECO_DOCES.get(round(float(preco), 2))),
+                "preco_manual": produto.get("tematico", nome == "Ninho Temático"), "desconto": desc.strip(),
+                "detalhes": detalhes_ninho.strip(),
             })
             invalidar_imagem()
             st.rerun()
@@ -768,8 +771,8 @@ def tela_criacao():
                     imagem = gerar_imagem(cliente, entrega, st.session_state.carrinho, numero, st.session_state.desconto_geral, st.session_state.embalagem_pedido, st.session_state.embalagens_especiais, st.session_state.adicionais, st.session_state.observacao)
                     registro = {"numero": numero, **registro_atual}
                     salvo = atualizar_orcamento_supabase(st.session_state.editando_id, registro) if modo_edicao else salvar_orcamento_supabase(registro)
-                except Exception as e:
-                    st.error(f"Não foi possível gerar o orçamento: {e}")
+                except Exception:
+                    st.error("Não foi possível gerar o orçamento. Confira os dados e tente novamente.")
                     salvo = None
                 if salvo is not None:
                     st.session_state.editando_id = salvo.get("id") or st.session_state.editando_id
@@ -825,8 +828,8 @@ def tela_historico():
                 try:
                     imagem = gerar_imagem(o["cliente"], entrega, o["itens"], o["numero"], o.get("desconto_geral", ""), o["embalagem_pedido"], o["embalagens_especiais"], o["adicionais"], o.get("observacao", ""))
                     mostrar_resultado({"imagem": imagem.getvalue(), "numero": o["numero"], "cliente": o["cliente"]}, identificador)
-                except Exception as e:
-                    st.error(f"Não foi possível visualizar este orçamento: {e}")
+                except Exception:
+                    st.error("Não foi possível visualizar este orçamento. Tente novamente.")
 
 
 def tela_projetos():
@@ -836,7 +839,7 @@ def tela_projetos():
 
 
 def main():
-    global supabase
+    global supabase, CATALOGO, REGRAS_PRECO_DOCES
     # O iframe acompanha a largura da página. A coluna centralizada acionava
     # o modo móvel do editor mesmo em monitores grandes.
     pagina = st.session_state.get("pagina_ativa", OPCOES_PAGINAS[0])
@@ -844,21 +847,34 @@ def main():
         page_title="Docito Doceria - Orçamentos", page_icon="🍰",
         layout="wide" if pagina == OPCOES_PAGINAS[2] else "centered",
     )
+    identidade = mostrar_login(BASE_DIR / "logo.png")
+    exigir_acesso()
     try:
         supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-    except Exception as e:
-        st.error("Erro ao conectar ao Supabase. Confira SUPABASE_URL e SUPABASE_KEY nos Secrets do Streamlit.")
-        st.exception(e)
+        config, revisao = carregar_configuracao(supabase)
+        CATALOGO, REGRAS_PRECO_DOCES = montar_catalogo(config)
+        st.session_state["_catalogo_revisao"] = revisao
+    except Exception:
+        st.error("Não foi possível carregar a Docito. Tente novamente em alguns instantes.")
         st.stop()
     for chave, valor in estado_inicial().items():
         if chave not in st.session_state:
             st.session_state[chave] = valor
-    if (BASE_DIR / "logo.png").exists():
-        st.image(str(BASE_DIR / "logo.png"), width=100)
-    else:
-        st.title("🍰 DOCITO DOCERIA")
+    logo, configuracoes, logout = st.columns([5, 0.8, 1])
+    with logo:
+        if (BASE_DIR / "logo.png").exists():
+            st.image(str(BASE_DIR / "logo.png"), width=100)
+        else:
+            st.title("🍰 DOCITO DOCERIA")
+    with configuracoes:
+        if st.button("⚙️", help="Configurar doces e preços", key="abrir_configuracoes"):
+            mostrar_configuracoes(supabase, config, revisao)
+    with logout:
+        st.button("Sair", on_click=sair)
+    st.caption(f"Conectado: {identidade.email}")
+    if st.session_state.pop("_catalogo_salvo", False):
+        st.success("Doces e preços atualizados!")
     st.title("Gerador de Orçamentos")
-    st.caption("V8 — Ninho Temático com preço personalizado")
     st.radio("Navegação", OPCOES_PAGINAS, key="pagina_ativa", horizontal=True, label_visibility="collapsed")
     if st.session_state.pagina_ativa == OPCOES_PAGINAS[0]:
         tela_criacao()
