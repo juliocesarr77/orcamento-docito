@@ -594,12 +594,12 @@ def tela_criacao():
         desc = c3.text_input("Desconto Item", placeholder="Ex.: 10% ou R$2", key="desconto_novo_unitario")
         if st.button("➕ Adicionar produto"):
             st.session_state.carrinho.append({
-                "id": uuid4().hex, "produto": nome, "tipo": "unitario", "qtd": int(qtd),
+                "id": uuid4().hex, "produto": nome, "produto_id": produto.get("id"), "gestao_product_id": produto.get("gestao_id"), "tipo": "unitario", "qtd": int(qtd),
                 "preco_cento": float(preco), "preco_unitario": produto.get("preco_unitario"),
                 "conta_como_doce": produto.get("conta_como_doce", True),
                 "cobranca": produto.get("cobranca", "Cento"),
                 "tematico": produto.get("tematico", nome == "Ninho Temático"),
-                "regra_preco": deepcopy(REGRAS_PRECO_DOCES.get(round(float(preco), 2))),
+                "regra_preco": None if produto.get("preco_proporcional") else deepcopy(REGRAS_PRECO_DOCES.get(round(float(preco), 2))),
                 "preco_manual": produto.get("tematico", nome == "Ninho Temático"), "desconto": desc.strip(),
                 "detalhes": detalhes_ninho.strip(),
             })

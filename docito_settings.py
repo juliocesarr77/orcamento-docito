@@ -38,6 +38,8 @@ def mostrar_configuracoes(client, config, revisao):
             key=f"doces_config_{revisao}", width="stretch",
             column_config={
                 "id": None,
+                "gestao_id": None,
+                "preco_proporcional": None,
                 "nome": st.column_config.TextColumn("Doce / produto", required=True, max_chars=140),
                 "cobranca": st.column_config.SelectboxColumn("Cobrança", options=TIPOS_COBRANCA, required=True),
                 "preco": st.column_config.NumberColumn("Preço (R$)", min_value=0.01, max_value=99999.99, step=0.01, format="R$ %.2f", required=True),
@@ -57,7 +59,7 @@ def mostrar_configuracoes(client, config, revisao):
         salvar = st.form_submit_button("Salvar alterações", type="primary")
     if salvar:
         try:
-            salvar_configuracao(client, {"versao": 1, "doces": doces, "faixas": faixas}, revisao)
+            salvar_configuracao(client, {**config, "versao": 1, "doces": doces, "faixas": faixas}, revisao)
         except (ValueError, CatalogoAlterado) as exc:
             st.warning(str(exc))
         except Exception:
@@ -65,3 +67,7 @@ def mostrar_configuracoes(client, config, revisao):
         else:
             st.session_state["_catalogo_salvo"] = True
             st.rerun(scope="app")
+
+    with st.expander("Preços da Gestão"):
+        from docito_gestao import mostrar_importacao
+        mostrar_importacao(client, config, revisao, salvar_configuracao)
