@@ -85,7 +85,7 @@ def validar_configuracao(config):
         raise ValueError("Mantenha entre 1 e 200 produtos no catálogo.")
     if not isinstance(faixas, list) or len(faixas) > 100:
         raise ValueError("A tabela de faixas aceita até 100 linhas.")
-    resultado, nomes, ids = [], set(), set()
+    resultado, nomes, ids, gestao_ids = [], set(), set(), set()
     for linha in doces:
         if not isinstance(linha, dict):
             raise ValueError("Produto inválido.")
@@ -114,6 +114,17 @@ def validar_configuracao(config):
                           "preco": _preco(linha.get("preco"), nome),
                           "conta_como_doce": _booleano(linha.get("conta_como_doce"), cobranca != "kg"),
                           "tematico": tematico})
+        if linha.get("gestao_id") is not None:
+            try:
+                gestao_id = str(UUID(str(linha["gestao_id"])))
+            except (ValueError, TypeError):
+                raise ValueError("Identificador da Gestão inválido.") from None
+            if gestao_id in gestao_ids:
+                raise ValueError("Um ID da Gestão não pode estar associado a dois produtos.")
+            gestao_ids.add(gestao_id)
+            resultado[-1]["gestao_id"] = gestao_id
+        if "preco_proporcional" in linha:
+            resultado[-1]["preco_proporcional"] = _booleano(linha["preco_proporcional"], False)
     faixas_validas, precos = [], set()
     for linha in faixas:
         if not isinstance(linha, dict):
@@ -128,7 +139,15 @@ def validar_configuracao(config):
         if any(a > b + 0.001 for a, b in zip(valores, valores[1:])) or totais["100"] != preco:
             raise ValueError("Os totais das faixas devem ser crescentes e o total de 100 deve ser igual ao preço do cento.")
         faixas_validas.append({"preco_cento": preco, "unitario_ate_25": unitario, **totais})
-    return {"versao": 1, "doces": resultado, "faixas": faixas_validas}
+    validado = {"versao": 1, "doces": resultado, "faixas": faixas_validas}
+    if "importacao_gestao" in config:
+        meta = config["importacao_gestao"]
+        if (not isinstance(meta, dict) or not isinstance(meta.get("gerado_em"), str)
+                or len(meta["gerado_em"]) > 64 or not isinstance(meta.get("sha256"), str)
+                or len(meta["sha256"]) != 64 or any(c not in "0123456789abcdef" for c in meta["sha256"])):
+            raise ValueError("Registro da importação da Gestão inválido.")
+        validado["importacao_gestao"] = {"gerado_em": meta["gerado_em"], "sha256": meta["sha256"]}
+    return validado
 
 
 def montar_catalogo(config):
@@ -136,7 +155,7 @@ def montar_catalogo(config):
     catalogo = {}
     for doce in config["doces"]:
         tipo, preco = doce["cobranca"], doce["preco"]
-        produto = {"tipo": "kg" if tipo == "kg" else "unitario", "cobranca": tipo,
+        produto = {"id": doce["id"], "gestao_id": doce.get("gestao_id"), "preco_proporcional": doce.get("preco_proporcional", False), "tipo": "kg" if tipo == "kg" else "unitario", "cobranca": tipo,
                    "conta_como_doce": doce["conta_como_doce"], "tematico": doce["tematico"]}
         if tipo == "kg":
             produto["preco_kg"] = preco
