@@ -50,3 +50,30 @@ class QuoteApprovalTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 orders.mostrar_integracao(client, {"id": "test", "revisao": 1})
         client.rpc.assert_not_called()
+
+
+def history_panel():
+    import streamlit as st
+    import app
+    app.supabase = st.session_state.client
+    app.tela_historico()
+
+
+class QuoteHistoryPerformanceTests(unittest.TestCase):
+    def test_closed_history_does_not_query_each_integration(self):
+        import app
+        client = Mock()
+        client.table.return_value.select.return_value.order.return_value.execute.return_value.data = [
+            {"id": "q1", "numero": 123, "cliente": "Exemplo 1", "data_entrega": "2026-11-01", "itens": [], "total": 10, "revisao": 1},
+            {"id": "q2", "numero": 124, "cliente": "Exemplo 2", "data_entrega": "2026-11-02", "itens": [], "total": 10, "revisao": 1},
+        ]
+        client.rpc.return_value.execute.return_value.data = {"status": "draft", "revision": 1, "approved_revision": 0, "synced_revision": 0}
+        at = AppTest.from_function(history_panel)
+        at.session_state.client = client
+        with patch.object(app, "exigir_acesso"), patch.object(orders, "exigir_acesso", return_value=SimpleNamespace(email="julio.goiano@gmail.com")):
+            at.run()
+            self.assertFalse(at.exception)
+            client.rpc.assert_not_called()
+            next(b for b in at.button if b.key == "gestao_toggle_q1").click().run()
+            self.assertFalse(at.exception)
+        client.rpc.assert_called_once_with("docito_quote_status", {"p_id": "q1", "p_retry": False})

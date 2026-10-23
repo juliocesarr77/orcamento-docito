@@ -816,7 +816,13 @@ def tela_historico():
                     st.caption(f"Tema: {tema}")
                 if item_eh_ninho_tematico(item) and item.get("preco_manual", False):
                     st.caption(f"Preço personalizado: {formatar_real(float(item['preco_cento']))} o cento.")
-            mostrar_integracao(supabase, o)
+            painel_gestao = f"gestao_aberto_{identificador}"
+            if int(o.get("gestao_synced_revision") or 0):
+                st.caption(f"Gestão: revisão {o['gestao_synced_revision']} recebida.")
+            if st.button("Ver integração / aprovar para Gestão", key=f"gestao_toggle_{identificador}"):
+                st.session_state[painel_gestao] = not st.session_state.get(painel_gestao, False)
+            if st.session_state.get(painel_gestao, False):
+                mostrar_integracao(supabase, o)
             c1, c2 = st.columns(2)
             c1.button(f"✏️ Editar Nº {o['numero']:03d}", key=f"editar_{identificador}", use_container_width=True, on_click=carregar_orcamento_para_edicao, args=(o,))
             chave = f"visualizando_{identificador}"

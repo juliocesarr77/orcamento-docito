@@ -1,6 +1,6 @@
 # Orçamentos aprovados → encomendas
 
-No Histórico, abra o orçamento salvo, confira cliente, entrega, itens e total, marque **O cliente autorizou esta versão do orçamento** e clique **Aprovar e agendar na Gestão**. Somente o orçamento aprovado é enviado; não há importação em massa dos registros antigos.
+No Histórico, abra o orçamento salvo e clique **Ver integração / aprovar para Gestão**. Confira cliente, entrega, itens e total, marque **O cliente autorizou esta versão do orçamento** e clique **Aprovar e agendar na Gestão**. Somente o orçamento aprovado é enviado; não há importação em massa dos registros antigos.
 
 O banco guarda a revisão e uma cópia imutável da aprovação em uma fila privada. O envio é tentado automaticamente, com limite de dez tentativas. **Integrado** só aparece após o reconhecimento do Gestão. Atualizar situação/tentar novamente consulta a confirmação ou repete a mesma versão aprovada, sem aprovar um rascunho. Pode levar aproximadamente um minuto; indisponibilidade pode prolongar o prazo.
 
