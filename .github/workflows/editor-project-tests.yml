@@ -45,4 +45,4 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_*.py' -v
       - run: node --test tests/project-files.test.cjs
       - run: node --check editor/editor.js && node --check editor/project-files.js
-      - run: python -m py_compile app.py docito_auth.py docito_catalog.py docito_settings.py docito_editor_component.py
+      - run: python -m py_compile app.py docito_auth.py docito_catalog.py docito_settings.py docito_editor_component.py docito_orders.py

@@ -13,6 +13,7 @@ import base64
 import qrcode
 from supabase import create_client
 from docito_editor_component import mostrar_editor_docito
+from docito_orders import mostrar_integracao
 from docito_auth import mostrar_login, exigir_acesso, sair
 from docito_catalog import CATALOGO_PADRAO, REGRAS_PADRAO, montar_catalogo
 from docito_settings import carregar_configuracao, mostrar_configuracoes
@@ -815,6 +816,7 @@ def tela_historico():
                     st.caption(f"Tema: {tema}")
                 if item_eh_ninho_tematico(item) and item.get("preco_manual", False):
                     st.caption(f"Preço personalizado: {formatar_real(float(item['preco_cento']))} o cento.")
+            mostrar_integracao(supabase, o)
             c1, c2 = st.columns(2)
             c1.button(f"✏️ Editar Nº {o['numero']:03d}", key=f"editar_{identificador}", use_container_width=True, on_click=carregar_orcamento_para_edicao, args=(o,))
             chave = f"visualizando_{identificador}"
