@@ -8,3 +8,6 @@ qrcode==8.2
 multidict==7.0.0
 # Community Cloud bloqueia pyarrow 25.0.1 por uma falha de segmentação.
 pyarrow==24.0.0
+
+# Criptografia do backup independente.
+cryptography==50.0.2

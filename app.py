@@ -214,6 +214,9 @@ def normalizar_orcamento(registro):
         ("embalagens_especiais", []), ("adicionais", []),
     ):
         registro[campo] = registro.get(campo) or dados.get(campo) or padrao
+    registro["contato"] = registro.get("contato") or dados.get("contato") or {}
+    if not isinstance(registro["contato"],dict):
+        registro["contato"] = {}
     for campo in ("observacao", "desconto_geral"):
         if registro.get(campo) is None:
             registro[campo] = dados.get(campo, "")
@@ -246,10 +249,25 @@ def preparar_registro_supabase(novo_registro):
     registro["total"] = round(float(registro.get("total", 0)), 2)
     if not math.isfinite(registro["total"]) or registro["total"] < 0:
         raise ValueError("Total inválido.")
+    contato = registro.pop("contato", {})
+    if not isinstance(contato, dict):
+        raise ValueError("Contato inválido.")
+    contato_limpo = {}
+    for chave, limite in (("telefone",40),("email",254),("endereco",1000),("horario",80)):
+        valor = str(contato.get(chave) or "").strip()
+        if len(valor)>limite:
+            raise ValueError("Contato ou endereço excede o limite permitido.")
+        contato_limpo[chave] = valor
+    origem = str(contato.get("orcamento_origem") or "")
+    if origem and not re.fullmatch(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", origem):
+        raise ValueError("Referência de contato inválida.")
+    contato_limpo["orcamento_origem"] = origem
+    contato_limpo["modalidade"] = "delivery" if contato.get("modalidade")=="delivery" else "pickup"
     registro["dados"] = {campo: registro[campo] for campo in (
         "itens", "embalagem_pedido", "embalagens_especiais", "adicionais",
         "observacao", "desconto_geral", "total",
     )}
+    registro["dados"]["contato"] = contato_limpo
     return registro
 
 
@@ -469,6 +487,7 @@ def estado_inicial():
     return {
         "pagina_ativa": OPCOES_PAGINAS[0], "carrinho": [], "item_counter": 0,
         "cliente_input": "", "data_entrega_input": hoje_brasil(),
+        "_contatos_anteriores": [], "contato_anterior_escolhido": None, "contato_origem": "", "contato_telefone": "", "contato_email": "", "contato_endereco": "", "contato_modalidade": "pickup", "contato_horario": "",
         "desconto_geral": "", "observacao": "",
         "embalagem_pedido": {"descricao": "", "valor": 0.0},
         "embalagens_especiais": [], "adicionais": [],
@@ -497,12 +516,18 @@ def carregar_orcamento_para_edicao(orcamento):
         data = datetime.strptime(str(o.get("data_entrega", ""))[:10], "%Y-%m-%d").date()
     except ValueError:
         data = hoje_brasil()
-    itens = [{**it, "id": uuid4().hex} for it in o["itens"] if isinstance(it, dict)]
+    itens = [{**it, "id": it.get("id") or f"line-{n}"} for n,it in enumerate(o["itens"],1) if isinstance(it, dict)]
     embalagem = dict(o["embalagem_pedido"])
     st.session_state.update({
         "pagina_ativa": OPCOES_PAGINAS[0], "editando_id": o.get("id"),
         "editando_numero": o["numero"], "cliente_input": str(o.get("cliente") or ""),
         "data_entrega_input": data, "carrinho": itens, "item_counter": len(itens),
+        "contato_origem": o.get("contato",{}).get("orcamento_origem", ""),
+        "contato_telefone": o.get("contato",{}).get("telefone", ""),
+        "contato_email": o.get("contato",{}).get("email", ""),
+        "contato_endereco": o.get("contato",{}).get("endereco", ""),
+        "contato_modalidade": o.get("contato",{}).get("modalidade", "pickup"),
+        "contato_horario": o.get("contato",{}).get("horario", ""),
         "desconto_geral": str(o.get("desconto_geral") or ""),
         "observacao": str(o.get("observacao") or ""), "embalagem_pedido": embalagem,
         "emb_pedido_desc_input": str(embalagem.get("descricao") or ""),
@@ -510,6 +535,28 @@ def carregar_orcamento_para_edicao(orcamento):
         "embalagens_especiais": [dict(it) for it in o["embalagens_especiais"]],
         "adicionais": [dict(it) for it in o["adicionais"]], "ultimo_resultado": None,
     })
+
+
+def invalidar_cliente():
+    exigir_acesso()
+    st.session_state["contato_origem"] = ""
+    invalidar_imagem()
+
+
+def reutilizar_contato_anterior():
+    exigir_acesso()
+    escolhida = st.session_state.get("contato_anterior_escolhido")
+    anteriores = st.session_state.get("_contatos_anteriores", [])
+    if not isinstance(escolhida,int) or not 0<=escolhida<len(anteriores):
+        return
+    anterior = anteriores[escolhida]
+    contato = (anterior.get("dados") or {}).get("contato") or {}
+    st.session_state["cliente_input"] = str(anterior.get("cliente") or "")
+    st.session_state["contato_origem"] = str(anterior.get("id") or "")
+    for key in ("telefone","email","endereco","horario"):
+        st.session_state["contato_"+key] = str(contato.get(key) or "")
+    st.session_state["contato_modalidade"] = "delivery" if contato.get("modalidade")=="delivery" else "pickup"
+    invalidar_imagem()
 
 
 def invalidar_imagem():
@@ -572,8 +619,34 @@ def tela_criacao():
         st.info(f"✏️ Editando o orçamento Nº {int(st.session_state.editando_numero):03d}. O número será mantido.")
         st.button("Cancelar edição e criar novo orçamento", on_click=limpar_orcamento)
     c1, c2 = st.columns(2)
-    cliente = c1.text_input("Nome da Cliente", key="cliente_input", max_chars=200, on_change=invalidar_imagem)
+    cliente = c1.text_input("Nome da Cliente", key="cliente_input", max_chars=200, on_change=invalidar_cliente)
     entrega = c2.date_input("Data da Entrega", key="data_entrega_input", on_change=invalidar_imagem)
+    with st.expander("Contato e entrega (opcional; acompanha a aprovação na Gestão)"):
+        if st.button("Buscar contatos pelo nome informado", key="buscar_contato_anterior"):
+            exigir_acesso()
+            st.session_state["contato_anterior_escolhido"] = None
+            try:
+                nome_busca = str(st.session_state.cliente_input).strip()
+                if len(nome_busca)<2:
+                    st.warning("Digite pelo menos dois caracteres do nome do cliente.")
+                else:
+                    # Exact case-insensitive name, with escaped wildcard characters.
+                    escaped = nome_busca.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    st.session_state["_contatos_anteriores"] = supabase.table("orcamentos").select("id,numero,cliente,dados").ilike("cliente",escaped).order("atualizado_em",desc=True).limit(30).execute().data or []
+            except Exception:
+                st.warning("Não foi possível consultar os contatos. Você pode preencher manualmente sem perder o orçamento.")
+        anteriores = st.session_state.get("_contatos_anteriores", [])
+        if anteriores:
+            st.selectbox("Contato de orçamento anterior", [None,*range(len(anteriores))],format_func=lambda n: "Selecione após conferir" if n is None else f"Nº {anteriores[n]['numero']} · {anteriores[n]['cliente']} · {(anteriores[n].get('dados') or {}).get('contato',{}).get('telefone','Sem telefone')}",key="contato_anterior_escolhido")
+            st.button("Preencher com este contato conferido",on_click=reutilizar_contato_anterior,key="reutilizar_contato_confirmado")
+
+        st.text_input("Telefone do cliente", key="contato_telefone", max_chars=40, on_change=invalidar_imagem)
+        st.text_input("E-mail do cliente", key="contato_email", max_chars=254, on_change=invalidar_imagem)
+        st.selectbox("Modalidade", ["pickup", "delivery"], format_func=lambda x: "Entrega" if x=="delivery" else "Retirada", key="contato_modalidade", on_change=invalidar_imagem)
+        st.text_area("Endereço de entrega", key="contato_endereco", max_chars=1000, on_change=invalidar_imagem)
+        st.text_input("Horário / janela combinada", key="contato_horario", max_chars=80, on_change=invalidar_imagem)
+        st.caption("Dados internos para a equipe. Não são enviados por mensagem automaticamente nem incluídos na imagem do orçamento.")
+
     st.divider()
     st.subheader("Adicionar produtos")
     nome = st.selectbox("Produto", list(CATALOGO))
@@ -753,6 +826,7 @@ def tela_criacao():
     st.button("LIMPAR TUDO", type="secondary", on_click=limpar_orcamento)
     registro_atual = {
         "cliente": cliente.strip(), "data_entrega": entrega.isoformat(),
+        "contato": {"orcamento_origem":st.session_state.contato_origem,"telefone":st.session_state.contato_telefone,"email":st.session_state.contato_email,"endereco":st.session_state.contato_endereco,"modalidade":st.session_state.contato_modalidade,"horario":st.session_state.contato_horario},
         "desconto_geral": st.session_state.desconto_geral.strip(),
         "embalagem_pedido": dict(st.session_state.embalagem_pedido),
         "embalagens_especiais": [dict(it) for it in st.session_state.embalagens_especiais],

@@ -71,3 +71,6 @@ def mostrar_configuracoes(client, config, revisao):
     with st.expander("Preços da Gestão"):
         from docito_gestao import mostrar_importacao
         mostrar_importacao(client, config, revisao, salvar_configuracao)
+
+    from docito_backup import mostrar_backup
+    mostrar_backup(client)
