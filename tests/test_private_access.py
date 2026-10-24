@@ -179,7 +179,7 @@ class AppGateTests(unittest.TestCase):
             at.run()
             self.assertFalse(at.exception)
             self.assertIn("⚙️", [b.label for b in at.button])
-            self.assertEqual(len(at.selectbox[0].options), 20)
+            self.assertEqual(len(next(box for box in at.selectbox if box.label=="Produto").options), 20)
             at.button(key="abrir_configuracoes").click().run()
             self.assertFalse(at.exception)
             self.assertEqual(len(at.dataframe), 2)

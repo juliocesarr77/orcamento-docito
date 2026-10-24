@@ -1,0 +1,10 @@
+{
+  "name": "docito-orcamento-checks",
+  "private": true,
+  "scripts": {
+    "test:db": "node tests/test-outbox-db.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
+  }
+}

@@ -17,7 +17,9 @@ def mostrar_integracao(client, quote):
         approved = int(state.get("approved_revision") or 0)
         synced = int(state.get("synced_revision") or 0)
         current = int(state["revision"])
-        if synced >= current and status == "integrated":
+        if state.get("waiting_review"):
+            st.info("Edição aprovada recebida na Gestão. Como o pedido já iniciou, confira a comparação e aplique ou recuse a edição em Encomendas → Integração, edições e cancelamento.")
+        elif synced >= current and status == "integrated":
             st.success(f"Integrado à Gestão · revisão {current}.")
         elif current > approved:
             if approved:
@@ -26,8 +28,10 @@ def mostrar_integracao(client, quote):
                 st.info("Aprove somente depois da autorização do cliente. O envio agenda a encomenda; não registra venda, pagamento ou baixa de estoque.")
         else:
             st.warning(f"Integração pendente · revisão aprovada {approved}.")
-        if state.get("error"):
+        if state.get("error") and not state.get("waiting_review"):
             st.error(str(state["error"]))
+        if state.get("updated_at"):
+            st.caption(f"Última atualização da integração: {state['updated_at']}")
         if current > approved:
             confirmed = st.checkbox("O cliente autorizou esta versão do orçamento", key=f"confirm_gestao_{quote_id}_{current}")
             label = "Aprovar edição e atualizar Gestão" if approved else "Aprovar e agendar na Gestão"
